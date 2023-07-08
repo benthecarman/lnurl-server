@@ -1,12 +1,14 @@
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use axum::http::{Method, StatusCode, Uri};
 use axum::routing::get;
 use axum::{http, Extension, Router};
 use clap::Parser;
 use nostr::key::SecretKey;
+use nostr::prelude::ToBech32;
 use nostr::Keys;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string};
@@ -29,7 +31,6 @@ mod subscriber;
 pub struct State {
     pub db: Db,
     pub lnd: LndLightningClient,
-    pub key: SecretKey,
 }
 
 #[tokio::main]
@@ -78,14 +79,13 @@ async fn main() -> anyhow::Result<()> {
     let state = State {
         db,
         lnd: client.lightning().clone(),
-        key: keys.server_key,
     };
 
     // Invoice event stream
     spawn(start_invoice_subscription(
         state.db.clone(),
         state.lnd.clone(),
-        Keys::new(keys.server_key),
+        keys,
     ));
 
     let addr: std::net::SocketAddr = format!("{}:{}", config.bind, config.port)
@@ -127,7 +127,7 @@ async fn fallback(uri: Uri) -> (StatusCode, String) {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct NostrKeys {
-    server_key: SecretKey,
+    server_key: String,
 }
 
 impl NostrKeys {
@@ -135,16 +135,19 @@ impl NostrKeys {
         let server_key = Keys::generate();
 
         NostrKeys {
-            server_key: server_key.secret_key().unwrap(),
+            server_key: server_key.secret_key().unwrap().to_bech32().unwrap(),
         }
     }
 }
 
-fn get_keys(path: PathBuf) -> NostrKeys {
+fn get_keys(path: PathBuf) -> Keys {
     match File::open(&path) {
         Ok(file) => {
             let reader = BufReader::new(file);
-            from_reader(reader).expect("Could not parse JSON")
+            let n: NostrKeys = from_reader(reader).expect("Could not parse JSON");
+
+            let secret_key = SecretKey::from_str(&n.server_key).expect("Could not parse key");
+            Keys::new(secret_key)
         }
         Err(_) => {
             let keys = NostrKeys::generate();
@@ -154,7 +157,8 @@ fn get_keys(path: PathBuf) -> NostrKeys {
             file.write_all(json_str.as_bytes())
                 .expect("Could not write to file");
 
-            keys
+            let secret_key = SecretKey::from_str(&keys.server_key).expect("Could not parse key");
+            Keys::new(secret_key)
         }
     }
 }

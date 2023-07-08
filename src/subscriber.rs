@@ -115,7 +115,7 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
             );
 
             zap.note_id = Some(event_id.to_bech32().expect("bech32"));
-            upsert_zap(&db, payment_hash, zap)?;
+            upsert_zap(db, payment_hash, zap)?;
 
             Ok(())
         }
