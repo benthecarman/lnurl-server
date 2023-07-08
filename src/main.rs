@@ -1,13 +1,12 @@
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use axum::http::{Method, StatusCode, Uri};
 use axum::routing::get;
 use axum::{http, Extension, Router};
 use clap::Parser;
-use nostr::key::SecretKey;
+use nostr::key::FromSkStr;
 use nostr::prelude::ToBech32;
 use nostr::Keys;
 use serde::{Deserialize, Serialize};
@@ -146,8 +145,7 @@ fn get_keys(path: PathBuf) -> Keys {
             let reader = BufReader::new(file);
             let n: NostrKeys = from_reader(reader).expect("Could not parse JSON");
 
-            let secret_key = SecretKey::from_str(&n.server_key).expect("Could not parse key");
-            Keys::new(secret_key)
+            Keys::from_sk_str(&n.server_key).expect("Could not parse key")
         }
         Err(_) => {
             let keys = NostrKeys::generate();
@@ -157,8 +155,7 @@ fn get_keys(path: PathBuf) -> Keys {
             file.write_all(json_str.as_bytes())
                 .expect("Could not write to file");
 
-            let secret_key = SecretKey::from_str(&keys.server_key).expect("Could not parse key");
-            Keys::new(secret_key)
+            Keys::from_sk_str(&keys.server_key).expect("Could not parse key")
         }
     }
 }

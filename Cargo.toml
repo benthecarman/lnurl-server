@@ -16,7 +16,7 @@ clap = { version = "4.1.14", features = ["derive"] }
 lightning = "0.0.115"
 lightning-invoice = { version = "0.23.0", features = ["serde"] }
 lnurl-rs = { version = "=0.2.4", default-features = false }
-nostr = { version = "=0.22.0-bitcoin-v0.29", default-features = false, features = ["nip47"] }
+nostr = { version = "=0.22.0-bitcoin-v0.29", default-features = false, features = ["nip47", "nip19"] }
 nostr-sdk = "=0.22.0-bitcoin-v0.29"
 home = "0.5.4"
 serde = "1.0"
