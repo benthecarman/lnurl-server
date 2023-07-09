@@ -120,6 +120,7 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
             client.add_relays(relays).await?;
 
             let event_id = client.send_event(event).await?;
+            let _ = client.disconnect().await;
 
             println!(
                 "Broadcasted event id: {}!",
