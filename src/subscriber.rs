@@ -13,6 +13,7 @@ use nostr::{EventBuilder, Keys};
 use nostr_sdk::Client;
 use sled::Db;
 use std::net::SocketAddr;
+use std::time::Duration;
 use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 use tonic_openssl_lnd::{lnrpc, LndLightningClient};
 
@@ -45,14 +46,23 @@ pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key
         {
             match InvoiceState::from_i32(ln_invoice.state) {
                 Some(InvoiceState::Settled) => {
-                    match handle_paid_invoice(&db, ln_invoice.r_hash.to_hex(), key.clone()).await {
-                        Ok(_) => {
-                            println!("Handled paid invoice!");
+                    let db = db.clone();
+                    let key = key.clone();
+                    tokio::spawn(async move {
+                        let fut = handle_paid_invoice(&db, ln_invoice.r_hash.to_hex(), key.clone());
+
+                        match tokio::time::timeout(Duration::from_secs(30), fut).await {
+                            Ok(Ok(_)) => {
+                                println!("Handled paid invoice!");
+                            }
+                            Ok(Err(e)) => {
+                                eprintln!("Failed to handle paid invoice: {}", e);
+                            }
+                            Err(_) => {
+                                eprintln!("Timeout");
+                            }
                         }
-                        Err(e) => {
-                            eprintln!("Failed to handle paid invoice: {}", e);
-                        }
-                    }
+                    });
                 }
                 None
                 | Some(InvoiceState::Canceled)
