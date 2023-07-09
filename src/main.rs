@@ -80,13 +80,6 @@ async fn main() -> anyhow::Result<()> {
         lnd: client.lightning().clone(),
     };
 
-    // Invoice event stream
-    spawn(start_invoice_subscription(
-        state.db.clone(),
-        state.lnd.clone(),
-        keys,
-    ));
-
     let addr: std::net::SocketAddr = format!("{}:{}", config.bind, config.port)
         .parse()
         .expect("Failed to parse bind/port for webserver");
@@ -105,6 +98,13 @@ async fn main() -> anyhow::Result<()> {
         );
 
     let server = axum::Server::bind(&addr).serve(server_router.into_make_service());
+
+    // Invoice event stream
+    spawn(start_invoice_subscription(
+        state.db.clone(),
+        state.lnd.clone(),
+        keys,
+    ));
 
     let graceful = server.with_graceful_shutdown(async {
         tokio::signal::ctrl_c()

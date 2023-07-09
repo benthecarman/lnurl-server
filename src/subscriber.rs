@@ -28,35 +28,37 @@ const RELAYS: [&str; 8] = [
 ];
 
 pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key: Keys) {
-    println!("Starting invoice subscription");
+    loop {
+        println!("Starting invoice subscription");
 
-    let sub = lnrpc::InvoiceSubscription::default();
-    let mut invoice_stream = lnd
-        .subscribe_invoices(sub)
-        .await
-        .expect("Failed to start invoice subscription")
-        .into_inner();
+        let sub = lnrpc::InvoiceSubscription::default();
+        let mut invoice_stream = lnd
+            .subscribe_invoices(sub)
+            .await
+            .expect("Failed to start invoice subscription")
+            .into_inner();
 
-    while let Some(ln_invoice) = invoice_stream
-        .message()
-        .await
-        .expect("Failed to receive invoices")
-    {
-        match InvoiceState::from_i32(ln_invoice.state) {
-            Some(InvoiceState::Settled) => {
-                match handle_paid_invoice(&db, ln_invoice.r_hash.to_hex(), key.clone()).await {
-                    Ok(_) => {
-                        println!("Handled paid invoice!");
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to handle paid invoice: {}", e);
+        while let Some(ln_invoice) = invoice_stream
+            .message()
+            .await
+            .expect("Failed to receive invoices")
+        {
+            match InvoiceState::from_i32(ln_invoice.state) {
+                Some(InvoiceState::Settled) => {
+                    match handle_paid_invoice(&db, ln_invoice.r_hash.to_hex(), key.clone()).await {
+                        Ok(_) => {
+                            println!("Handled paid invoice!");
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to handle paid invoice: {}", e);
+                        }
                     }
                 }
+                None
+                | Some(InvoiceState::Canceled)
+                | Some(InvoiceState::Open)
+                | Some(InvoiceState::Accepted) => {}
             }
-            None
-            | Some(InvoiceState::Canceled)
-            | Some(InvoiceState::Open)
-            | Some(InvoiceState::Accepted) => {}
         }
     }
 }
