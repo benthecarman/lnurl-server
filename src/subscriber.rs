@@ -118,6 +118,7 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
             let relays: Vec<(String, Option<SocketAddr>)> =
                 RELAYS.into_iter().map(|r| (r.to_string(), None)).collect();
             client.add_relays(relays).await?;
+            client.connect().await;
 
             let event_id = client.send_event(event).await?;
             let _ = client.disconnect().await;
