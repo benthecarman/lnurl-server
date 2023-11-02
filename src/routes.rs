@@ -7,6 +7,8 @@ use axum::{Extension, Json};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
 use lightning_invoice::Invoice;
+use lnurl::pay::PayResponse;
+use lnurl::Tag;
 use nostr::Event;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -96,6 +98,31 @@ pub async fn get_invoice(
         }))),
         Err(e) => Err(handle_anyhow_error(e)),
     }
+}
+
+pub async fn get_lnurl_pay(
+    Path(name): Path<String>,
+    Extension(state): Extension<State>,
+) -> Result<Json<PayResponse>, (StatusCode, Json<Value>)> {
+    let metadata = format!(
+        "[[\"text/identifier\",\"{name}@{}\"],[\"text/plain\",\"Sats for {name}\"]]",
+        state.domain,
+    );
+
+    let hash = sha256::Hash::hash(metadata.as_bytes());
+    let callback = format!("https://{}/get-invoice/{}", state.domain, hash.to_hex());
+
+    let resp = PayResponse {
+        callback,
+        max_sendable: 1_000,
+        min_sendable: 11_000_000_000,
+        tag: Tag::PayRequest,
+        metadata,
+        allows_nostr: Some(true),
+        nostr_pubkey: Some(state.keys.public_key()),
+    };
+
+    Ok(Json(resp))
 }
 
 pub(crate) fn handle_anyhow_error(err: anyhow::Error) -> (StatusCode, Json<Value>) {

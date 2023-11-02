@@ -30,6 +30,8 @@ mod subscriber;
 pub struct State {
     pub db: Db,
     pub lnd: LndLightningClient,
+    pub keys: Keys,
+    pub domain: String,
 }
 
 #[tokio::main]
@@ -78,6 +80,8 @@ async fn main() -> anyhow::Result<()> {
     let state = State {
         db,
         lnd: client.lightning().clone(),
+        keys: keys.clone(),
+        domain: config.domain.clone(),
     };
 
     let addr: std::net::SocketAddr = format!("{}:{}", config.bind, config.port)
@@ -88,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
 
     let server_router = Router::new()
         .route("/get-invoice/:hash", get(get_invoice))
+        .route("/.well-known/lnurlp/:name", get(get_lnurl_pay))
         .fallback(fallback)
         .layer(Extension(state.clone()))
         .layer(

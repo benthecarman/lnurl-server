@@ -29,6 +29,9 @@ pub struct Config {
     #[clap(long)]
     /// Path to admin.macaroon file for lnd
     macaroon_file: Option<String>,
+    /// The domain name you are running lnurl-server on
+    #[clap(default_value_t = String::from(""), long)]
+    pub domain: String,
 }
 
 impl Config {
