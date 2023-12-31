@@ -1,10 +1,9 @@
 use crate::db::{get_zap, upsert_zap};
-use bitcoin::hashes::hex::ToHex;
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
+use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::rand::rngs::OsRng;
 use bitcoin::secp256k1::rand::RngCore;
-use bitcoin::secp256k1::SECP256K1;
 use lightning::ln::PaymentSecret;
 use lightning_invoice::{Currency, InvoiceBuilder};
 use nostr::key::SecretKey;
@@ -12,7 +11,6 @@ use nostr::prelude::ToBech32;
 use nostr::{EventBuilder, Keys};
 use nostr_sdk::Client;
 use sled::Db;
-use std::net::SocketAddr;
 use std::time::Duration;
 use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 use tonic_openssl_lnd::{lnrpc, LndLightningClient};
@@ -49,7 +47,8 @@ pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key
                     let db = db.clone();
                     let key = key.clone();
                     tokio::spawn(async move {
-                        let fut = handle_paid_invoice(&db, ln_invoice.r_hash.to_hex(), key.clone());
+                        let fut =
+                            handle_paid_invoice(&db, hex::encode(ln_invoice.r_hash), key.clone());
 
                         match tokio::time::timeout(Duration::from_secs(30), fut).await {
                             Ok(Ok(_)) => {
@@ -104,20 +103,18 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
                 .payment_hash(invoice_hash)
                 .payment_secret(PaymentSecret(*payment_secret))
                 .min_final_cltv_expiry_delta(144)
-                .build_signed(|hash| SECP256K1.sign_ecdsa_recoverable(hash, &private_key))?;
+                .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))?;
 
-            let event = EventBuilder::new_zap(
+            let event = EventBuilder::new_zap_receipt(
                 fake_invoice.to_string(),
-                Some(preimage.to_hex()),
+                Some(hex::encode(preimage)),
                 zap.request.clone(),
             )
             .to_event(&keys)?;
 
             // Create new client
             let client = Client::new(&keys);
-            let relays: Vec<(String, Option<SocketAddr>)> =
-                RELAYS.into_iter().map(|r| (r.to_string(), None)).collect();
-            client.add_relays(relays).await?;
+            client.add_relays(RELAYS).await?;
             client.connect().await;
 
             let event_id = client.send_event(event).await?;

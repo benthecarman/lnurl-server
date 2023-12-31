@@ -1,11 +1,11 @@
-use lightning_invoice::Invoice;
+use lightning_invoice::Bolt11Invoice;
 use nostr::Event;
 use serde::{Deserialize, Serialize};
 use sled::Db;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Zap {
-    pub invoice: Invoice,
+    pub invoice: Bolt11Invoice,
     pub request: Event,
     pub note_id: Option<String>,
 }

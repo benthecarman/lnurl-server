@@ -4,15 +4,15 @@ use anyhow::anyhow;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
-use lightning_invoice::Invoice;
+use lightning_invoice::Bolt11Invoice;
 use lnurl::pay::PayResponse;
 use lnurl::Tag;
-use nostr::Event;
+use nostr::{Event, JsonUtil};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
+use bitcoin::secp256k1::ThirtyTwoByteHash;
 use tonic_openssl_lnd::lnrpc;
 
 pub(crate) async fn get_invoice_impl(
@@ -23,7 +23,7 @@ pub(crate) async fn get_invoice_impl(
 ) -> anyhow::Result<String> {
     let mut lnd = state.lnd.clone();
     let desc_hash = match zap_request.as_ref() {
-        None => sha256::Hash::from_hex(&hash)?,
+        None => sha256::Hash::from_str(&hash)?,
         Some(event) => {
             // todo validate as valid zap request
             if event.kind != nostr::Kind::ZapRequest {
@@ -35,7 +35,7 @@ pub(crate) async fn get_invoice_impl(
 
     let request = lnrpc::Invoice {
         value_msat: amount_msats as i64,
-        description_hash: desc_hash.to_vec(),
+        description_hash: desc_hash.into_32().to_vec(),
         expiry: 86_400,
         ..Default::default()
     };
@@ -43,13 +43,13 @@ pub(crate) async fn get_invoice_impl(
     let resp = lnd.add_invoice(request).await?.into_inner();
 
     if let Some(zap_request) = zap_request {
-        let invoice = Invoice::from_str(&resp.payment_request)?;
+        let invoice = Bolt11Invoice::from_str(&resp.payment_request)?;
         let zap = Zap {
             invoice,
             request: zap_request,
             note_id: None,
         };
-        upsert_zap(&state.db, resp.r_hash.to_hex(), zap)?;
+        upsert_zap(&state.db, hex::encode(resp.r_hash), zap)?;
     }
 
     Ok(resp.payment_request)
@@ -110,7 +110,7 @@ pub async fn get_lnurl_pay(
     );
 
     let hash = sha256::Hash::hash(metadata.as_bytes());
-    let callback = format!("https://{}/get-invoice/{}", state.domain, hash.to_hex());
+    let callback = format!("https://{}/get-invoice/{}", state.domain, hex::encode(hash));
 
     let resp = PayResponse {
         callback,
@@ -118,6 +118,7 @@ pub async fn get_lnurl_pay(
         min_sendable: 11_000_000_000,
         tag: Tag::PayRequest,
         metadata,
+        comment_allowed: None,
         allows_nostr: Some(true),
         nostr_pubkey: Some(state.keys.public_key()),
     };
