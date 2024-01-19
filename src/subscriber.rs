@@ -4,8 +4,7 @@ use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::rand::rngs::OsRng;
 use bitcoin::secp256k1::rand::RngCore;
-use lightning::ln::PaymentSecret;
-use lightning_invoice::{Currency, InvoiceBuilder};
+use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
 use nostr::key::SecretKey;
 use nostr::prelude::ToBech32;
 use nostr::{EventBuilder, Keys};
@@ -105,7 +104,7 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
                 .min_final_cltv_expiry_delta(144)
                 .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))?;
 
-            let event = EventBuilder::new_zap_receipt(
+            let event = EventBuilder::zap_receipt(
                 fake_invoice.to_string(),
                 Some(hex::encode(preimage)),
                 zap.request.clone(),
