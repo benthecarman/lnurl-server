@@ -102,6 +102,7 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
                 .payment_hash(invoice_hash)
                 .payment_secret(PaymentSecret(*payment_secret))
                 .min_final_cltv_expiry_delta(144)
+                .basic_mpp()
                 .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))?;
 
             let event = EventBuilder::zap_receipt(
