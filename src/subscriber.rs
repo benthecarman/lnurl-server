@@ -79,16 +79,14 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
                 return Ok(());
             }
 
-            let preimage = &mut [0u8; 32];
-            OsRng.fill_bytes(preimage);
-            let invoice_hash = Sha256::hash(preimage);
+            let mut preimage = [0u8; 32];
+            OsRng.fill_bytes(&mut preimage);
+            let invoice_hash = Sha256::hash(&preimage);
 
-            let payment_secret = &mut [0u8; 32];
-            OsRng.fill_bytes(payment_secret);
+            let mut payment_secret = [0u8; 32];
+            OsRng.fill_bytes(&mut payment_secret);
 
-            let priv_key_bytes = &mut [0u8; 32];
-            OsRng.fill_bytes(priv_key_bytes);
-            let private_key = SecretKey::from_slice(priv_key_bytes)?;
+            let private_key = SecretKey::new(&mut OsRng);
 
             let amt_msats = zap
                 .invoice
@@ -100,10 +98,12 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
                 .invoice_description(zap.invoice.description())
                 .current_timestamp()
                 .payment_hash(invoice_hash)
-                .payment_secret(PaymentSecret(*payment_secret))
+                .payment_secret(PaymentSecret(payment_secret))
                 .min_final_cltv_expiry_delta(144)
                 .basic_mpp()
-                .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &private_key))?;
+                .build_signed(|hash| {
+                    Secp256k1::signing_only().sign_ecdsa_recoverable(hash, &private_key)
+                })?;
 
             let event = EventBuilder::zap_receipt(
                 fake_invoice.to_string(),
