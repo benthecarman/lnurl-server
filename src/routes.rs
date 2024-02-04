@@ -5,6 +5,7 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use bitcoin::hashes::{sha256, Hash};
+use bitcoin::secp256k1::ThirtyTwoByteHash;
 use lightning_invoice::Bolt11Invoice;
 use lnurl::pay::PayResponse;
 use lnurl::Tag;
@@ -12,7 +13,6 @@ use nostr::{Event, JsonUtil};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
-use bitcoin::secp256k1::ThirtyTwoByteHash;
 use tonic_openssl_lnd::lnrpc;
 
 pub(crate) async fn get_invoice_impl(
@@ -114,8 +114,8 @@ pub async fn get_lnurl_pay(
 
     let resp = PayResponse {
         callback,
-        max_sendable: 1_000,
-        min_sendable: 11_000_000_000,
+        min_sendable: 1_000,
+        max_sendable: 11_000_000_000,
         tag: Tag::PayRequest,
         metadata,
         comment_allowed: None,
