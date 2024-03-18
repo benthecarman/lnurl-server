@@ -120,7 +120,7 @@ pub async fn get_lnurl_pay(
         metadata,
         comment_allowed: None,
         allows_nostr: Some(true),
-        nostr_pubkey: Some(state.keys.public_key()),
+        nostr_pubkey: Some(*state.keys.public_key()),
     };
 
     Ok(Json(resp))
