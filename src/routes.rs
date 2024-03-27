@@ -37,6 +37,7 @@ pub(crate) async fn get_invoice_impl(
         value_msat: amount_msats as i64,
         description_hash: desc_hash.into_32().to_vec(),
         expiry: 86_400,
+        private: state.route_hints,
         ..Default::default()
     };
 

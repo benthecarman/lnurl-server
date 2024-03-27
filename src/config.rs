@@ -32,6 +32,9 @@ pub struct Config {
     /// The domain name you are running lnurl-server on
     #[clap(default_value_t = String::from(""), long)]
     pub domain: String,
+    #[clap(long)]
+    /// Include route hints in invoices
+    pub route_hints: bool,
 }
 
 impl Config {
