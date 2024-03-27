@@ -31,6 +31,7 @@ pub struct State {
     pub lnd: LndLightningClient,
     pub keys: Keys,
     pub domain: String,
+    pub route_hints: bool,
 }
 
 #[tokio::main]
@@ -81,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
         lnd: client.lightning().clone(),
         keys: keys.clone(),
         domain: config.domain.clone(),
+        route_hints: config.route_hints,
     };
 
     let addr: std::net::SocketAddr = format!("{}:{}", config.bind, config.port)
