@@ -3,16 +3,16 @@ use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, author, about)]
-/// A tool for zapping based on reactions to notes.
+/// A simple LNURL pay server. Allows you to have a lightning address for your own node.
 pub struct Config {
     #[clap(default_value_t = String::from("."), long)]
     /// Location of database and keys files
     pub data_dir: String,
     #[clap(default_value_t = String::from("0.0.0.0"), long)]
-    /// Bind address for zap-tunnel's webserver
+    /// Bind address for lnurl-server's webserver
     pub bind: String,
     #[clap(default_value_t = 3000, long)]
-    /// Port for zap-tunnel's webserver
+    /// Port for lnurl-server's webserver
     pub port: u16,
     #[clap(default_value_t = String::from("127.0.0.1"), long)]
     /// Host of the GRPC server for lnd
