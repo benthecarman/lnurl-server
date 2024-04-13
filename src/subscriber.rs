@@ -2,8 +2,6 @@ use crate::db::{get_zap, upsert_zap};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
-use bitcoin::secp256k1::rand::rngs::OsRng;
-use bitcoin::secp256k1::rand::RngCore;
 use bitcoin::secp256k1::SecretKey;
 use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
 use nostr::prelude::ToBech32;
@@ -79,14 +77,12 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
                 return Ok(());
             }
 
-            let mut preimage = [0u8; 32];
-            OsRng.fill_bytes(&mut preimage);
+            let preimage = zap.request.id.to_bytes();
             let invoice_hash = Sha256::hash(&preimage);
 
-            let mut payment_secret = [0u8; 32];
-            OsRng.fill_bytes(&mut payment_secret);
+            let payment_secret = zap.request.id.to_bytes();
 
-            let private_key = SecretKey::new(&mut OsRng);
+            let private_key = SecretKey::from_hashed_data::<Sha256>(zap.request.id.as_bytes());
 
             let amt_msats = zap
                 .invoice
