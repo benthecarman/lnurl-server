@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use axum::http::{Method, StatusCode, Uri};
 use axum::routing::get;
-use axum::{http, Extension, Router};
+use axum::{http, Extension, Json, Router};
 use clap::Parser;
 use nostr::prelude::ToBech32;
 use nostr::Keys;
@@ -92,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Webserver running on http://{}", addr);
 
     let server_router = Router::new()
+        .route("/health-check", get(health_check))
         .route("/get-invoice/:hash", get(get_invoice))
         .route("/.well-known/lnurlp/:name", get(get_lnurl_pay))
         .fallback(fallback)
@@ -164,4 +165,26 @@ fn get_keys(path: PathBuf) -> Keys {
             Keys::parse(&keys.server_key).expect("Could not parse key")
         }
     }
+}
+
+#[derive(Serialize)]
+pub struct HealthResponse {
+    pub status: String,
+    pub version: String,
+}
+
+impl HealthResponse {
+    /// Fabricate a status: pass response without checking database connectivity
+    pub fn new_ok() -> Self {
+        Self {
+            status: String::from("pass"),
+            version: String::from("0"),
+        }
+    }
+}
+
+/// IETF draft RFC for HTTP API Health Checks:
+/// https://datatracker.ietf.org/doc/html/draft-inadarei-api-health-check
+pub async fn health_check() -> Result<Json<HealthResponse>, (StatusCode, String)> {
+    Ok(Json(HealthResponse::new_ok()))
 }
