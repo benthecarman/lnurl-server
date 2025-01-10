@@ -5,35 +5,44 @@ use clap::Parser;
 #[command(version, author, about)]
 /// A simple LNURL pay server. Allows you to have a lightning address for your own node.
 pub struct Config {
-    #[clap(default_value_t = String::from("."), long)]
     /// Location of database and keys files
+    #[clap(default_value_t = String::from("."), long, env = "LNURL_DATA_DIR")]
     pub data_dir: String,
-    #[clap(default_value_t = String::from("0.0.0.0"), long)]
+
     /// Bind address for lnurl-server's webserver
+    #[clap(default_value_t = String::from("0.0.0.0"), long, env = "LNURL_BIND")]
     pub bind: String,
-    #[clap(default_value_t = 3000, long)]
+
     /// Port for lnurl-server's webserver
+    #[clap(default_value_t = 3000, long, env = "LNURL_PORT")]
     pub port: u16,
-    #[clap(default_value_t = String::from("127.0.0.1"), long)]
+
     /// Host of the GRPC server for lnd
+    #[clap(default_value_t = String::from("127.0.0.1"), long, env = "LNURL_LND_HOST")]
     pub lnd_host: String,
-    #[clap(default_value_t = 10009, long)]
+
     /// Port of the GRPC server for lnd
+    #[clap(default_value_t = 10009, long, env = "LNURL_LND_PORT")]
     pub lnd_port: u32,
-    #[clap(default_value_t = Network::Bitcoin, short, long)]
+
     /// Network lnd is running on ["bitcoin", "testnet", "signet, "regtest"]
+    #[clap(default_value_t = Network::Bitcoin, short, long, env = "LNURL_NETWORK")]
     pub network: Network,
-    #[clap(long)]
+
     /// Path to tls.cert file for lnd
+    #[clap(long, env = "LNURL_CERT_FILE")]
     cert_file: Option<String>,
-    #[clap(long)]
+
     /// Path to admin.macaroon file for lnd
+    #[clap(long, env = "LNURL_MACAROON_FILE")]
     macaroon_file: Option<String>,
+
     /// The domain name you are running lnurl-server on
-    #[clap(default_value_t = String::from(""), long)]
+    #[clap(default_value_t = String::from(""), long, env = "LNURL_DOMAIN")]
     pub domain: String,
-    #[clap(long)]
+
     /// Include route hints in invoices
+    #[clap(long, env = "LNURL_ROUTE_HINTS")]
     pub route_hints: bool,
 }
 
