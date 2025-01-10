@@ -12,8 +12,7 @@ use std::time::Duration;
 use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 use tonic_openssl_lnd::{lnrpc, LndLightningClient};
 
-const RELAYS: [&str; 8] = [
-    "wss://nostr.mutinywallet.com",
+const RELAYS: [&str; 7] = [
     "wss://relay.snort.social",
     "wss://relay.nostr.band",
     "wss://eden.nostr.land",
