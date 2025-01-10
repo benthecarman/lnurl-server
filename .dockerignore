@@ -1,0 +1,6 @@
+.gitignore
+.github
+*.md
+justfile
+.env.local
+.env
