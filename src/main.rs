@@ -128,16 +128,31 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Fallback route handler that returns a 404 Not Found response
+/// when a request is made to a non-existent route.
+///
+/// # Parameters
+/// * `uri` - The URI of the request
+///
+/// # Returns
+/// A 404 status code and a message indicating the route was not found
 async fn fallback(uri: Uri) -> (StatusCode, String) {
     (StatusCode::NOT_FOUND, format!("No route for {}", uri))
 }
 
+/// Storage structure for Nostr keys used by the server.
+/// 
+/// Contains the server's private key in bech32 format.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct NostrKeys {
     server_key: String,
 }
 
 impl NostrKeys {
+    /// Generates a new set of Nostr keys for the server.
+    ///
+    /// # Returns
+    /// A `NostrKeys` instance containing the newly generated server key in bech32 format.
     fn generate() -> Self {
         let server_key = Keys::generate();
 
@@ -147,6 +162,15 @@ impl NostrKeys {
     }
 }
 
+/// Retrieves Nostr keys from a file or generates new keys if the file doesn't exist.
+///
+/// If the file exists, keys are loaded from it. If not, new keys are generated and saved to the file.
+///
+/// # Parameters
+/// * `path` - The path to the file storing the keys
+///
+/// # Returns
+/// The loaded or newly generated `Keys`
 fn get_keys(path: PathBuf) -> Keys {
     match File::open(&path) {
         Ok(file) => {

@@ -23,6 +23,15 @@ const RELAYS: [&str; 8] = [
     "wss://sendit.nosflare.com",
 ];
 
+/// Starts a subscription to listen for invoice updates from LND.
+///
+/// This function runs in an infinite loop, creating a subscription to LND's invoice stream
+/// and handling paid invoices by processing the associated zap requests.
+///
+/// # Parameters
+/// * `db` - The database instance for storing/retrieving zap data
+/// * `lnd` - The LND Lightning client for interacting with the LND node
+/// * `key` - The Nostr keys for signing events
 pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key: Keys) {
     loop {
         println!("Starting invoice subscription");
@@ -69,6 +78,17 @@ pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key
     }
 }
 
+/// Processes a paid invoice by creating and broadcasting a zap receipt.
+///
+/// When an invoice is paid, this function creates a zap receipt and broadcasts it to Nostr relays.
+///
+/// # Parameters
+/// * `db` - The database instance to retrieve and update the zap data
+/// * `payment_hash` - The hash of the payment that was settled
+/// * `keys` - The Nostr keys for signing the zap receipt
+///
+/// # Returns
+/// `Ok(())` if successful, or an error if any part of the process fails
 async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyhow::Result<()> {
     match get_zap(db, payment_hash.clone())? {
         None => Ok(()),
