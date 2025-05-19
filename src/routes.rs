@@ -16,6 +16,18 @@ use std::str::FromStr;
 use tonic_openssl_lnd::lnrpc;
 use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 
+/// Creates a Lightning invoice and optionally stores zap request information.
+///
+/// This is the core implementation for generating invoices for LNURL-pay requests.
+///
+/// # Parameters
+/// * `state` - Application state containing LND client and configuration
+/// * `hash` - A description hash or identifier for the invoice
+/// * `amount_msats` - The invoice amount in millisatoshis
+/// * `zap_request` - Optional Nostr zap request event
+///
+/// # Returns
+/// A string containing the BOLT11 invoice if successful, or an error
 pub(crate) async fn get_invoice_impl(
     state: &State,
     hash: &str,
@@ -57,6 +69,17 @@ pub(crate) async fn get_invoice_impl(
     Ok(resp.payment_request)
 }
 
+/// HTTP endpoint for generating Lightning invoices from a LNURL-pay request.
+///
+/// This route handles the callback phase of the LNURL-pay protocol.
+///
+/// # Parameters
+/// * `hash` - Path parameter containing the description hash
+/// * `params` - Query parameters including the amount and optional zap request
+/// * `state` - Application state
+///
+/// # Returns
+/// A JSON response with the invoice and verification URL, or an error response
 pub async fn get_invoice(
     Path(hash): Path<String>,
     Query(params): Query<HashMap<String, String>>,
@@ -117,6 +140,16 @@ pub async fn get_invoice(
     }
 }
 
+/// HTTP endpoint that provides the LNURL-pay metadata and parameters.
+///
+/// This is the entry point for the LNURL-pay protocol, served at the .well-known/lnurlp/{name} path.
+///
+/// # Parameters
+/// * `name` - Path parameter containing the username portion of the Lightning address
+/// * `state` - Application state with domain and configuration
+///
+/// # Returns
+/// A LNURL PayResponse with callback URL and other parameters, or an error response
 pub async fn get_lnurl_pay(
     Path(name): Path<String>,
     Extension(state): Extension<State>,
@@ -143,6 +176,16 @@ pub async fn get_lnurl_pay(
     Ok(Json(resp))
 }
 
+/// HTTP endpoint for verifying the status of a Lightning invoice payment.
+///
+/// This route is called by clients to check if an invoice has been paid.
+///
+/// # Parameters
+/// * `desc_hash` and `pay_hash` - Path parameters for the description hash and payment hash
+/// * `state` - Application state with LND client
+///
+/// # Returns
+/// A JSON response indicating settlement status and preimage (if settled), or an error response
 pub async fn verify(
     Path((desc_hash, pay_hash)): Path<(String, String)>,
     Extension(state): Extension<State>,
@@ -227,6 +270,13 @@ pub async fn verify(
     }
 }
 
+/// Utility function for converting anyhow errors to HTTP response format.
+///
+/// # Parameters
+/// * `err` - The anyhow Error to convert
+///
+/// # Returns
+/// A tuple containing a 400 Bad Request status code and a JSON error response
 pub(crate) fn handle_anyhow_error(err: anyhow::Error) -> (StatusCode, Json<Value>) {
     let err = json!({
         "status": "ERROR",

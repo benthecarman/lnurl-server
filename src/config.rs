@@ -47,17 +47,38 @@ pub struct Config {
 }
 
 impl Config {
+    /// Gets the path to the LND macaroon file.
+    ///
+    /// If a macaroon file path is explicitly specified in the config, that path is used.
+    /// Otherwise, it uses a default path based on the network.
+    ///
+    /// # Returns
+    /// A string containing the path to the macaroon file
     pub fn macaroon_file(&self) -> String {
         self.macaroon_file
             .clone()
             .unwrap_or_else(|| default_macaroon_file(&self.network))
     }
 
+    /// Gets the path to the LND TLS certificate file.
+    ///
+    /// If a certificate file path is explicitly specified in the config, that path is used.
+    /// Otherwise, it uses a default path.
+    ///
+    /// # Returns
+    /// A string containing the path to the TLS certificate file
     pub fn cert_file(&self) -> String {
         self.cert_file.clone().unwrap_or_else(default_cert_file)
     }
 }
 
+/// Gets the user's home directory path.
+///
+/// This function retrieves the home directory path and ensures it doesn't 
+/// have a trailing slash for consistent path construction.
+///
+/// # Returns
+/// A string representing the home directory path
 fn home_directory() -> String {
     let buf = home::home_dir().expect("Failed to get home dir");
     let str = format!("{}", buf.display());
@@ -70,10 +91,24 @@ fn home_directory() -> String {
     }
 }
 
+/// Gets the default path for the LND TLS certificate file.
+///
+/// # Returns
+/// A string with the default path to the LND TLS certificate file
 pub fn default_cert_file() -> String {
     format!("{}/.lnd/tls.cert", home_directory())
 }
 
+/// Gets the default path for the LND macaroon file based on the network.
+///
+/// # Parameters
+/// * `network` - The Bitcoin network (mainnet, testnet, signet, regtest)
+///
+/// # Returns
+/// A string with the default path to the LND macaroon file
+/// 
+/// # Panics
+/// Panics if an unsupported network is provided
 pub fn default_macaroon_file(network: &Network) -> String {
     let network_str = match network {
         Network::Bitcoin => "mainnet",
