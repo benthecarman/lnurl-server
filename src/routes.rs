@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::ThirtyTwoByteHash;
-use lightning_invoice::Bolt11Invoice;
+use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription};
 use lnurl::pay::PayResponse;
 use lnurl::Tag;
 use nostr::{Event, JsonUtil};
@@ -14,16 +14,17 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
 use tonic_openssl_lnd::lnrpc;
+use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 
 pub(crate) async fn get_invoice_impl(
-    state: State,
-    hash: String,
+    state: &State,
+    hash: &str,
     amount_msats: u64,
     zap_request: Option<Event>,
 ) -> anyhow::Result<String> {
     let mut lnd = state.lnd.clone();
     let desc_hash = match zap_request.as_ref() {
-        None => sha256::Hash::from_str(&hash)?,
+        None => sha256::Hash::from_str(hash)?,
         Some(event) => {
             // todo validate as valid zap request
             if event.kind != nostr::Kind::ZapRequest {
@@ -92,11 +93,26 @@ pub async fn get_invoice(
         }
     }?;
 
-    match get_invoice_impl(state, hash, amount_msats, zap_request).await {
-        Ok(invoice) => Ok(Json(json!({
-            "pr": invoice,
-            "routers": []
-        }))),
+    match get_invoice_impl(&state, &hash, amount_msats, zap_request).await {
+        Ok(invoice) => {
+            let invoice = Bolt11Invoice::from_str(&invoice).map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "status": "ERROR",
+                        "reason": "Invalid invoice",
+                    })),
+                )
+            })?;
+            let payment_hash = hex::encode(invoice.payment_hash().to_byte_array());
+            let verify_url = format!("https://{}/verify/{hash}/{payment_hash}", state.domain);
+            Ok(Json(json!({
+                "status": "OK",
+                "pr": invoice,
+                "verify": verify_url,
+                "routers": [],
+            })))
+        }
         Err(e) => Err(handle_anyhow_error(e)),
     }
 }
@@ -125,6 +141,90 @@ pub async fn get_lnurl_pay(
     };
 
     Ok(Json(resp))
+}
+
+pub async fn verify(
+    Path((desc_hash, pay_hash)): Path<(String, String)>,
+    Extension(state): Extension<State>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let mut lnd = state.lnd.clone();
+
+    let desc_hash: Vec<u8> = hex::decode(desc_hash).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": "ERROR",
+                "reason": "Invalid description hash",
+            })),
+        )
+    })?;
+
+    let pay_hash: Vec<u8> = hex::decode(pay_hash).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": "ERROR",
+                "reason": "Invalid payment hash",
+            })),
+        )
+    })?;
+
+    let request = lnrpc::PaymentHash {
+        r_hash: pay_hash.to_vec(),
+        ..Default::default()
+    };
+
+    let resp = match lnd.lookup_invoice(request).await {
+        Ok(resp) => resp.into_inner(),
+        Err(_) => {
+            return Ok(Json(json!({
+                "status": "ERROR",
+                "reason": "Not found",
+            })));
+        }
+    };
+
+    let invoice = Bolt11Invoice::from_str(&resp.payment_request).map_err(|_| {
+        (
+            StatusCode::OK,
+            Json(json!({
+                "status": "ERROR",
+                "reason": "Not found",
+            })),
+        )
+    })?;
+
+    match invoice.description() {
+        Bolt11InvoiceDescription::Direct(_) => Ok(Json(json!({
+            "status": "ERROR",
+            "reason": "Not found",
+        }))),
+        Bolt11InvoiceDescription::Hash(h) => {
+            if h.0.to_byte_array().to_vec() == desc_hash {
+                if resp.state() == InvoiceState::Settled && !resp.r_preimage.is_empty() {
+                    let preimage = hex::encode(resp.r_preimage);
+                    Ok(Json(json!({
+                        "status": "OK",
+                        "settled": true,
+                        "preimage": preimage,
+                        "pr": invoice,
+                    })))
+                } else {
+                    Ok(Json(json!({
+                        "status": "OK",
+                        "settled": false,
+                        "preimage": (),
+                        "pr": invoice,
+                    })))
+                }
+            } else {
+                Ok(Json(json!({
+                    "status": "ERROR",
+                    "reason": "Not found",
+                })))
+            }
+        }
+    }
 }
 
 pub(crate) fn handle_anyhow_error(err: anyhow::Error) -> (StatusCode, Json<Value>) {

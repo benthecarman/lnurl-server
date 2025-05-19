@@ -94,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
     let server_router = Router::new()
         .route("/health-check", get(health_check))
         .route("/get-invoice/:hash", get(get_invoice))
+        .route("/verify/:desc_hash/:pay_hash", get(verify))
         .route("/.well-known/lnurlp/:name", get(get_lnurl_pay))
         .fallback(fallback)
         .layer(Extension(state.clone()))
