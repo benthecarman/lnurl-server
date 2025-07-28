@@ -75,6 +75,8 @@ pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key
                 | Some(InvoiceState::Accepted) => {}
             }
         }
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
 
