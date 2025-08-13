@@ -1,4 +1,4 @@
-FROM rust:1.76.0 AS builder
+FROM rust:1.88 AS builder
 
 # Install build dependencies
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
