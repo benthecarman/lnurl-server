@@ -44,6 +44,14 @@ pub struct Config {
     /// Include route hints in invoices
     #[clap(long, env = "LNURL_ROUTE_HINTS")]
     pub route_hints: bool,
+
+    /// Telegram bot token for sending notifications
+    #[clap(long, env = "LNURL_TELEGRAM_TOKEN")]
+    pub telegram_token: Option<String>,
+
+    /// Telegram chat id for sending notifications
+    #[clap(long, env = "LNURL_TELEGRAM_CHAT_ID")]
+    pub telegram_chat_id: Option<String>,
 }
 
 impl Config {
@@ -74,7 +82,7 @@ impl Config {
 
 /// Gets the user's home directory path.
 ///
-/// This function retrieves the home directory path and ensures it doesn't 
+/// This function retrieves the home directory path and ensures it doesn't
 /// have a trailing slash for consistent path construction.
 ///
 /// # Returns
@@ -106,7 +114,7 @@ pub fn default_cert_file() -> String {
 ///
 /// # Returns
 /// A string with the default path to the LND macaroon file
-/// 
+///
 /// # Panics
 /// Panics if an unsupported network is provided
 pub fn default_macaroon_file(network: &Network) -> String {

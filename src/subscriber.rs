@@ -32,7 +32,14 @@ const RELAYS: [&str; 8] = [
 /// * `db` - The database instance for storing/retrieving zap data
 /// * `lnd` - The LND Lightning client for interacting with the LND node
 /// * `key` - The Nostr keys for signing events
-pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key: Keys) {
+pub async fn start_invoice_subscription(
+    db: Db,
+    mut lnd: LndLightningClient,
+    key: Keys,
+    telegram_token: Option<String>,
+    telegram_id: Option<String>,
+) {
+    let client = reqwest::Client::new();
     loop {
         println!("Starting invoice subscription");
 
@@ -52,9 +59,18 @@ pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key
                 Some(InvoiceState::Settled) => {
                     let db = db.clone();
                     let key = key.clone();
+                    let client = client.clone();
+                    let telegram_token = telegram_token.clone();
+                    let telegram_id = telegram_id.clone();
                     tokio::spawn(async move {
-                        let fut =
-                            handle_paid_invoice(&db, hex::encode(ln_invoice.r_hash), key.clone());
+                        let fut = handle_paid_invoice(
+                            &db,
+                            hex::encode(ln_invoice.r_hash),
+                            key,
+                            client,
+                            telegram_token,
+                            telegram_id,
+                        );
 
                         match tokio::time::timeout(Duration::from_secs(30), fut).await {
                             Ok(Ok(_)) => {
@@ -91,7 +107,14 @@ pub async fn start_invoice_subscription(db: Db, mut lnd: LndLightningClient, key
 ///
 /// # Returns
 /// `Ok(())` if successful, or an error if any part of the process fails
-async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyhow::Result<()> {
+async fn handle_paid_invoice(
+    db: &Db,
+    payment_hash: String,
+    keys: Keys,
+    http: reqwest::Client,
+    telegram_token: Option<String>,
+    telegram_id: Option<String>,
+) -> anyhow::Result<()> {
     match get_zap(db, payment_hash.clone())? {
         None => Ok(()),
         Some(mut zap) => {
@@ -129,6 +152,24 @@ async fn handle_paid_invoice(db: &Db, payment_hash: String, keys: Keys) -> anyho
                 zap.request.clone(),
             )
             .to_event(&keys)?;
+
+            if let Some(token) = telegram_token {
+                if let Some(id) = telegram_id {
+                    tokio::spawn(async move {
+                        let url = format!(
+                            "https://api.telegram.org/bot{token}/sendMessage?chat_id={}&text={}",
+                            urlencoding::encode(id.as_str()),
+                            urlencoding::encode(
+                                format!("Zapped! {} sats", amt_msats / 1000).as_str()
+                            )
+                        );
+
+                        if let Err(e) = http.get(&url).send().await {
+                            eprintln!("Failed to send Telegram message: {e}");
+                        }
+                    });
+                }
+            }
 
             // Create new client
             let client = Client::new(&keys);

@@ -112,6 +112,8 @@ async fn main() -> anyhow::Result<()> {
         state.db.clone(),
         state.lnd.clone(),
         keys,
+        config.telegram_token,
+        config.telegram_chat_id,
     ));
 
     let graceful = server.with_graceful_shutdown(async {
@@ -141,7 +143,7 @@ async fn fallback(uri: Uri) -> (StatusCode, String) {
 }
 
 /// Storage structure for Nostr keys used by the server.
-/// 
+///
 /// Contains the server's private key in bech32 format.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct NostrKeys {
