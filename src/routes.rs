@@ -164,8 +164,8 @@ pub async fn get_lnurl_pay(
 
     let resp = PayResponse {
         callback,
-        min_sendable: 1_000,
-        max_sendable: 11_000_000_000,
+        min_sendable: state.min_sendable,
+        max_sendable: state.max_sendable,
         tag: Tag::PayRequest,
         metadata,
         comment_allowed: None,

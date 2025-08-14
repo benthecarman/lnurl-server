@@ -32,6 +32,8 @@ pub struct State {
     pub keys: Keys,
     pub domain: String,
     pub route_hints: bool,
+    pub min_sendable: u64,
+    pub max_sendable: u64,
 }
 
 #[tokio::main]
@@ -83,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
         keys: keys.clone(),
         domain: config.domain.clone(),
         route_hints: config.route_hints,
+        min_sendable: config.min_senable,
+        max_sendable: config.max_sendable,
     };
 
     let addr: std::net::SocketAddr = format!("{}:{}", config.bind, config.port)

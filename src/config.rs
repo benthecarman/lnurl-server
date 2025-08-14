@@ -29,6 +29,14 @@ pub struct Config {
     #[clap(default_value_t = Network::Bitcoin, short, long, env = "LNURL_NETWORK")]
     pub network: Network,
 
+    /// Minimum amount in millisatoshis that can be sent via LNURL
+    #[clap(default_value_t = 1_000, long, env = "LNURL_MIN_SENDABLE")]
+    pub min_senable: u64,
+
+    /// Maximum amount in millisatoshis that can be sent via LNURL
+    #[clap(default_value_t = 11_000_000_000, long, env = "LNURL_MAX_SENDABLE")]
+    pub max_sendable: u64,
+
     /// Path to tls.cert file for lnd
     #[clap(long, env = "LNURL_CERT_FILE")]
     cert_file: Option<String>,
