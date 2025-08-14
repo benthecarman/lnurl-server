@@ -3,7 +3,9 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::SecretKey;
-use lightning_invoice::{Currency, InvoiceBuilder, PaymentSecret};
+use lightning_invoice::{
+    Bolt11InvoiceDescription, Bolt11InvoiceDescriptionRef, Currency, InvoiceBuilder, PaymentSecret,
+};
 use nostr::prelude::ToBech32;
 use nostr::{EventBuilder, Keys};
 use nostr_sdk::Client;
@@ -127,16 +129,25 @@ async fn handle_paid_invoice(
 
             let payment_secret = zap.request.id.to_bytes();
 
-            let private_key = SecretKey::from_hashed_data::<Sha256>(zap.request.id.as_bytes());
+            let private_key = SecretKey::from_slice(zap.request.id.as_bytes())?;
 
             let amt_msats = zap
                 .invoice
                 .amount_milli_satoshis()
                 .expect("Invoice must have an amount");
 
+            let desc = match zap.invoice.description() {
+                Bolt11InvoiceDescriptionRef::Direct(str) => {
+                    Bolt11InvoiceDescription::Direct(str.clone())
+                }
+                Bolt11InvoiceDescriptionRef::Hash(hash) => {
+                    Bolt11InvoiceDescription::Hash(hash.clone())
+                }
+            };
+
             let fake_invoice = InvoiceBuilder::new(Currency::Bitcoin)
                 .amount_milli_satoshis(amt_msats)
-                .invoice_description(zap.invoice.description())
+                .invoice_description(desc)
                 .current_timestamp()
                 .payment_hash(invoice_hash)
                 .payment_secret(PaymentSecret(payment_secret))
@@ -149,9 +160,9 @@ async fn handle_paid_invoice(
             let event = EventBuilder::zap_receipt(
                 fake_invoice.to_string(),
                 Some(hex::encode(preimage)),
-                zap.request.clone(),
+                &zap.request,
             )
-            .to_event(&keys)?;
+            .sign_with_keys(&keys)?;
 
             if let Some(token) = telegram_token {
                 if let Some(id) = telegram_id {
@@ -172,11 +183,15 @@ async fn handle_paid_invoice(
             }
 
             // Create new client
-            let client = Client::new(&keys);
-            client.add_relays(RELAYS).await?;
+            let client = Client::new(keys);
+            for r in RELAYS {
+                if let Err(e) = client.add_relay(r).await {
+                    eprintln!("Failed to add relay {r}: {e}");
+                }
+            }
             client.connect().await;
 
-            let event_id = client.send_event(event).await?;
+            let event_id = client.send_event(&event).await?;
             let _ = client.disconnect().await;
 
             println!(

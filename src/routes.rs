@@ -5,8 +5,7 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::secp256k1::ThirtyTwoByteHash;
-use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription};
+use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef};
 use lnurl::pay::PayResponse;
 use lnurl::Tag;
 use nostr::{Event, JsonUtil};
@@ -48,7 +47,7 @@ pub(crate) async fn get_invoice_impl(
 
     let request = lnrpc::Invoice {
         value_msat: amount_msats as i64,
-        description_hash: desc_hash.into_32().to_vec(),
+        description_hash: desc_hash.to_byte_array().to_vec(),
         expiry: 86_400,
         private: state.route_hints,
         ..Default::default()
@@ -57,7 +56,8 @@ pub(crate) async fn get_invoice_impl(
     let resp = lnd.add_invoice(request).await?.into_inner();
 
     if let Some(zap_request) = zap_request {
-        let invoice = Bolt11Invoice::from_str(&resp.payment_request)?;
+        let invoice = Bolt11Invoice::from_str(&resp.payment_request)
+            .map_err(|_| anyhow!("Invalid invoice format"))?;
         let zap = Zap {
             invoice,
             request: zap_request,
@@ -170,7 +170,13 @@ pub async fn get_lnurl_pay(
         metadata,
         comment_allowed: None,
         allows_nostr: Some(true),
-        nostr_pubkey: Some(*state.keys.public_key()),
+        nostr_pubkey: Some(
+            state
+                .keys
+                .public_key()
+                .xonly()
+                .expect("cant get xonly pubkey"),
+        ),
     };
 
     Ok(Json(resp))
@@ -238,11 +244,11 @@ pub async fn verify(
     })?;
 
     match invoice.description() {
-        Bolt11InvoiceDescription::Direct(_) => Ok(Json(json!({
+        Bolt11InvoiceDescriptionRef::Direct(_) => Ok(Json(json!({
             "status": "ERROR",
             "reason": "Not found",
         }))),
-        Bolt11InvoiceDescription::Hash(h) => {
+        Bolt11InvoiceDescriptionRef::Hash(h) => {
             if h.0.to_byte_array().to_vec() == desc_hash {
                 if resp.state() == InvoiceState::Settled && !resp.r_preimage.is_empty() {
                     let preimage = hex::encode(resp.r_preimage);

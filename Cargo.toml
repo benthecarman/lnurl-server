@@ -15,13 +15,12 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0"
 axum = "0.6.20"
-base64 = "=0.13.1"
-bitcoin = { version = "0.30.2", features = ["serde"] }
+bitcoin = { version = "0.32.7", features = ["serde"] }
 clap = { version = "4.1.14", features = ["derive", "env"] }
-lightning-invoice = { version = "0.29.0", features = ["serde"] }
-lnurl-rs = { version = "0.4.0", default-features = false }
-nostr = { version = "0.29.0", default-features = false, features = ["nip57"] }
-nostr-sdk = "0.29.0"
+lightning-invoice = { version = "0.33.2", features = ["serde", "std"] }
+lnurl-rs = { version = "0.9.0", default-features = false }
+nostr = { version = "0.40.0", default-features = false, features = ["nip57"] }
+nostr-sdk = "0.40.0"
 home = "0.5.4"
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 serde = "1.0"

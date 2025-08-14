@@ -159,7 +159,7 @@ impl NostrKeys {
         let server_key = Keys::generate();
 
         NostrKeys {
-            server_key: server_key.secret_key().unwrap().to_bech32().unwrap(),
+            server_key: server_key.secret_key().to_bech32().unwrap(),
         }
     }
 }
@@ -179,7 +179,7 @@ fn get_keys(path: PathBuf) -> Keys {
             let reader = BufReader::new(file);
             let n: NostrKeys = from_reader(reader).expect("Could not parse JSON");
 
-            Keys::parse(n.server_key).expect("Could not parse key")
+            Keys::parse(&n.server_key).expect("Could not parse key")
         }
         Err(_) => {
             let keys = NostrKeys::generate();
