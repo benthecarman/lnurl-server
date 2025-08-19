@@ -154,6 +154,16 @@ pub async fn get_lnurl_pay(
     Path(name): Path<String>,
     Extension(state): Extension<State>,
 ) -> Result<Json<PayResponse>, (StatusCode, Json<Value>)> {
+    if name.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": "ERROR",
+                "reason": "Name parameter is required",
+            })),
+        ));
+    }
+
     let metadata = format!(
         "[[\"text/identifier\",\"{name}@{}\"],[\"text/plain\",\"Sats for {name}\"]]",
         state.domain,
