@@ -60,6 +60,10 @@ pub struct Config {
     /// Telegram chat id for sending notifications
     #[clap(long, env = "LNURL_TELEGRAM_CHAT_ID")]
     pub telegram_chat_id: Option<String>,
+
+    /// Precomputed names for the LNURL pay server watcher
+    #[clap(long)]
+    pub precompute_name: Vec<String>,
 }
 
 impl Config {

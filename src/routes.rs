@@ -140,6 +140,10 @@ pub async fn get_invoice(
     }
 }
 
+pub fn calc_metadata(name: &str, domain: &str) -> String {
+    format!("[[\"text/identifier\",\"{name}@{domain}\"],[\"text/plain\",\"Sats for {name}\"]]",)
+}
+
 /// HTTP endpoint that provides the LNURL-pay metadata and parameters.
 ///
 /// This is the entry point for the LNURL-pay protocol, served at the .well-known/lnurlp/{name} path.
@@ -164,10 +168,7 @@ pub async fn get_lnurl_pay(
         ));
     }
 
-    let metadata = format!(
-        "[[\"text/identifier\",\"{name}@{}\"],[\"text/plain\",\"Sats for {name}\"]]",
-        state.domain,
-    );
+    let metadata = calc_metadata(&name, &state.domain);
 
     let hash = sha256::Hash::hash(metadata.as_bytes());
     let callback = format!("https://{}/get-invoice/{}", state.domain, hex::encode(hash));
@@ -188,6 +189,12 @@ pub async fn get_lnurl_pay(
                 .expect("cant get xonly pubkey"),
         ),
     };
+
+    // insert the name into the state for later use
+    tokio::spawn(async move {
+        let mut map = state.name_watcher.write().await;
+        map.insert(hash, name)
+    });
 
     Ok(Json(resp))
 }

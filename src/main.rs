@@ -1,17 +1,20 @@
-use std::fs::File;
-use std::io::{BufReader, Write};
-use std::path::PathBuf;
-
 use axum::http::{Method, StatusCode, Uri};
 use axum::routing::get;
 use axum::{http, Extension, Json, Router};
+use bitcoin::hashes::{sha256, Hash};
 use clap::Parser;
 use nostr::prelude::ToBech32;
 use nostr::Keys;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_reader, to_string};
 use sled::Db;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufReader, Write};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::spawn;
+use tokio::sync::RwLock;
 use tonic_openssl_lnd::lnrpc::{GetInfoRequest, GetInfoResponse};
 use tonic_openssl_lnd::LndLightningClient;
 use tower_http::cors::{Any, CorsLayer};
@@ -30,6 +33,9 @@ pub struct State {
     pub db: Db,
     pub lnd: LndLightningClient,
     pub keys: Keys,
+    pub name_watcher: Arc<RwLock<HashMap<sha256::Hash, String>>>,
+
+    // -- config options --
     pub domain: String,
     pub route_hints: bool,
     pub min_sendable: u64,
@@ -83,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
         db,
         lnd: client.lightning().clone(),
         keys: keys.clone(),
+        name_watcher: Arc::new(RwLock::new(HashMap::new())),
         domain: config.domain.clone(),
         route_hints: config.route_hints,
         min_sendable: config.min_sendable,
@@ -118,7 +125,18 @@ async fn main() -> anyhow::Result<()> {
         keys,
         config.telegram_token,
         config.telegram_chat_id,
+        state.name_watcher.clone(),
     ));
+
+    // Precompute names for LNURL pay server watcher
+    {
+        let mut name_watcher = state.name_watcher.write().await;
+        for name in config.precompute_name {
+            let metadata = calc_metadata(&name, &state.domain);
+            let hash = sha256::Hash::hash(metadata.as_bytes());
+            name_watcher.insert(hash, name);
+        }
+    }
 
     let graceful = server.with_graceful_shutdown(async {
         tokio::signal::ctrl_c()

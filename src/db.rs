@@ -36,7 +36,7 @@ pub fn upsert_zap(db: &Db, payment_hash: String, zap: Zap) -> anyhow::Result<()>
 /// # Returns
 /// `Ok(Some(Zap))` if the record is found, `Ok(None)` if not found,
 /// or an error if the retrieval or deserialization fails
-pub fn get_zap(db: &Db, payment_hash: String) -> anyhow::Result<Option<Zap>> {
+pub fn get_zap(db: &Db, payment_hash: &str) -> anyhow::Result<Option<Zap>> {
     let value = db.get(payment_hash.as_bytes())?;
 
     match value {

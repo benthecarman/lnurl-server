@@ -1,6 +1,6 @@
 use crate::db::{get_zap, upsert_zap};
 use bitcoin::hashes::sha256::Hash as Sha256;
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::SecretKey;
 use lightning_invoice::{
@@ -10,7 +10,10 @@ use nostr::prelude::ToBech32;
 use nostr::{EventBuilder, Keys};
 use nostr_sdk::Client;
 use sled::Db;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 use tonic_openssl_lnd::{lnrpc, LndLightningClient};
 
@@ -40,6 +43,7 @@ pub async fn start_invoice_subscription(
     key: Keys,
     telegram_token: Option<String>,
     telegram_id: Option<String>,
+    name_watcher: Arc<RwLock<HashMap<sha256::Hash, String>>>,
 ) {
     let client = reqwest::Client::new();
     loop {
@@ -64,6 +68,7 @@ pub async fn start_invoice_subscription(
                     let client = client.clone();
                     let telegram_token = telegram_token.clone();
                     let telegram_id = telegram_id.clone();
+                    let name_watcher = Arc::clone(&name_watcher);
                     tokio::spawn(async move {
                         let fut = handle_paid_invoice(
                             &db,
@@ -72,14 +77,25 @@ pub async fn start_invoice_subscription(
                             client,
                             telegram_token,
                             telegram_id,
+                            ln_invoice.description_hash,
+                            name_watcher,
                         );
 
                         match tokio::time::timeout(Duration::from_secs(30), fut).await {
-                            Ok(Ok(_)) => {
-                                println!("Handled paid invoice!");
-                            }
+                            Ok(Ok(source)) => match source {
+                                InvoiceSource::Name(name) => {
+                                    if let Some(name) = name {
+                                        println!("Handled paid invoice with name: {name}");
+                                    } else {
+                                        println!("Handled paid invoice without saved name");
+                                    }
+                                }
+                                InvoiceSource::Zap => {
+                                    println!("Handled paid invoice with zap request!");
+                                }
+                            },
                             Ok(Err(e)) => {
-                                eprintln!("Failed to handle paid invoice: {}", e);
+                                eprintln!("Failed to handle paid invoice: {e}");
                             }
                             Err(_) => {
                                 eprintln!("Timeout");
@@ -98,6 +114,12 @@ pub async fn start_invoice_subscription(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvoiceSource {
+    Name(Option<String>),
+    Zap,
+}
+
 /// Processes a paid invoice by creating and broadcasting a zap receipt.
 ///
 /// When an invoice is paid, this function creates a zap receipt and broadcasts it to Nostr relays.
@@ -109,6 +131,7 @@ pub async fn start_invoice_subscription(
 ///
 /// # Returns
 /// `Ok(())` if successful, or an error if any part of the process fails
+#[allow(clippy::too_many_arguments)]
 async fn handle_paid_invoice(
     db: &Db,
     payment_hash: String,
@@ -116,12 +139,20 @@ async fn handle_paid_invoice(
     http: reqwest::Client,
     telegram_token: Option<String>,
     telegram_id: Option<String>,
-) -> anyhow::Result<()> {
-    match get_zap(db, payment_hash.clone())? {
-        None => Ok(()),
+    desc_hash: Vec<u8>,
+    name_watcher: Arc<RwLock<HashMap<sha256::Hash, String>>>,
+) -> anyhow::Result<InvoiceSource> {
+    match get_zap(db, &payment_hash)? {
+        None => {
+            let hash = sha256::Hash::from_slice(&desc_hash)
+                .map_err(|_| anyhow::anyhow!("Invalid description hash"))?;
+            let name_watcher = name_watcher.read().await;
+            let name = name_watcher.get(&hash).cloned();
+            Ok(InvoiceSource::Name(name))
+        }
         Some(mut zap) => {
             if zap.note_id.is_some() {
-                return Ok(());
+                return Ok(InvoiceSource::Zap);
             }
 
             let preimage = zap.request.id.to_bytes();
@@ -202,7 +233,7 @@ async fn handle_paid_invoice(
             zap.note_id = Some(event_id.to_bech32().expect("bech32"));
             upsert_zap(db, payment_hash, zap)?;
 
-            Ok(())
+            Ok(InvoiceSource::Zap)
         }
     }
 }
