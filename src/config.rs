@@ -31,7 +31,7 @@ pub struct Config {
 
     /// Minimum amount in millisatoshis that can be sent via LNURL
     #[clap(default_value_t = 1_000, long, env = "LNURL_MIN_SENDABLE")]
-    pub min_senable: u64,
+    pub min_sendable: u64,
 
     /// Maximum amount in millisatoshis that can be sent via LNURL
     #[clap(default_value_t = 11_000_000_000, long, env = "LNURL_MAX_SENDABLE")]

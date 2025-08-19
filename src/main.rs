@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         keys: keys.clone(),
         domain: config.domain.clone(),
         route_hints: config.route_hints,
-        min_sendable: config.min_senable,
+        min_sendable: config.min_sendable,
         max_sendable: config.max_sendable,
     };
 
