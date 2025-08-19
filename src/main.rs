@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::spawn;
 use tokio::sync::RwLock;
@@ -135,6 +136,18 @@ async fn main() -> anyhow::Result<()> {
             let metadata = calc_metadata(&name, &state.domain);
             let hash = sha256::Hash::hash(metadata.as_bytes());
             name_watcher.insert(hash, name);
+        }
+
+        for proxy in config.proxied_name {
+            // proxy string is in the format <description_hash>:<name>
+            let parts: Vec<&str> = proxy.split(':').collect();
+            if parts.len() != 2 {
+                panic!("Invalid proxied name: {proxy}");
+            }
+            let desc_hash = parts[0];
+            let hash = sha256::Hash::from_str(desc_hash)
+                .expect("invalid description hash in proxied name");
+            name_watcher.insert(hash, parts[1].to_string());
         }
     }
 

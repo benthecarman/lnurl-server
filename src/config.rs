@@ -64,6 +64,12 @@ pub struct Config {
     /// Precomputed names for the LNURL pay server watcher
     #[clap(long)]
     pub precompute_name: Vec<String>,
+
+    /// Proxied names for the LNURL pay server watcher
+    /// In the format <description_hash>:<name>
+    /// e.g. "abc123:alice"
+    #[clap(long)]
+    pub proxied_name: Vec<String>,
 }
 
 impl Config {
