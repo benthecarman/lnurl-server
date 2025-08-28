@@ -133,7 +133,7 @@ pub async fn get_invoice(
                 "status": "OK",
                 "pr": invoice,
                 "verify": verify_url,
-                "routers": [],
+                "routes": [],
             })))
         }
         Err(e) => Err(handle_anyhow_error(e)),
