@@ -149,6 +149,8 @@ async fn main() -> anyhow::Result<()> {
                 .expect("invalid description hash in proxied name");
             name_watcher.insert(hash, parts[1].to_string());
         }
+
+        println!("Precomputed {} names for LNURL pay server", name_watcher.len());
     }
 
     let graceful = server.with_graceful_shutdown(async {
