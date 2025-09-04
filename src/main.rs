@@ -3,6 +3,8 @@ use axum::routing::get;
 use axum::{http, Extension, Json, Router};
 use bitcoin::hashes::{sha256, Hash};
 use clap::Parser;
+use fedimint_tonic_lnd::lnrpc::{GetInfoRequest, GetInfoResponse};
+use fedimint_tonic_lnd::LightningClient;
 use nostr::prelude::ToBech32;
 use nostr::Keys;
 use serde::{Deserialize, Serialize};
@@ -16,8 +18,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::spawn;
 use tokio::sync::RwLock;
-use tonic_openssl_lnd::lnrpc::{GetInfoRequest, GetInfoResponse};
-use tonic_openssl_lnd::LndLightningClient;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::config::*;
@@ -32,7 +32,7 @@ mod subscriber;
 #[derive(Clone)]
 pub struct State {
     pub db: Db,
-    pub lnd: LndLightningClient,
+    pub lnd: LightningClient,
     pub keys: Keys,
     pub name_watcher: Arc<RwLock<HashMap<sha256::Hash, String>>>,
 
@@ -47,14 +47,11 @@ pub struct State {
 async fn main() -> anyhow::Result<()> {
     let config: Config = Config::parse();
 
-    let mut client = tonic_openssl_lnd::connect(
-        config.lnd_host.clone(),
-        config.lnd_port,
-        config.cert_file(),
-        config.macaroon_file(),
-    )
-    .await
-    .expect("failed to connect");
+    let lnd_addr = format!("http://{}:{}", config.lnd_host, config.lnd_port);
+    let mut client =
+        fedimint_tonic_lnd::connect(lnd_addr, config.cert_file(), config.macaroon_file())
+            .await
+            .expect("failed to connect");
 
     let mut ln_client = client.lightning().clone();
     let lnd_info: GetInfoResponse = ln_client
@@ -150,7 +147,10 @@ async fn main() -> anyhow::Result<()> {
             name_watcher.insert(hash, parts[1].to_string());
         }
 
-        println!("Precomputed {} names for LNURL pay server", name_watcher.len());
+        println!(
+            "Precomputed {} names for LNURL pay server",
+            name_watcher.len()
+        );
     }
 
     let graceful = server.with_graceful_shutdown(async {

@@ -27,7 +27,7 @@ serde = "1.0"
 serde_json = "1.0"
 sled = "0.34.7"
 tokio = { version = "1.26.0", features = ["full"] }
-tonic_openssl_lnd = "0.2.0"
+fedimint-tonic-lnd = { git = "https://github.com/benthecarman/tonic_lnd.git", branch = "fedimint-update-protos", default-features = false, features = ["lightningrpc"] }
 tower-http = { version = "0.4.0", features = ["cors"] }
 hex = "0.4.3"
 urlencoding = "2.1"

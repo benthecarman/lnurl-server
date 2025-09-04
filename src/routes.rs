@@ -5,6 +5,8 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use bitcoin::hashes::{sha256, Hash};
+use fedimint_tonic_lnd::lnrpc;
+use fedimint_tonic_lnd::lnrpc::invoice::InvoiceState;
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescriptionRef};
 use lnurl::pay::PayResponse;
 use lnurl::Tag;
@@ -12,8 +14,6 @@ use nostr::{Event, JsonUtil};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::str::FromStr;
-use tonic_openssl_lnd::lnrpc;
-use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 
 /// Creates a Lightning invoice and optionally stores zap request information.
 ///

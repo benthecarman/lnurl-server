@@ -3,6 +3,8 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::Secp256k1;
 use bitcoin::secp256k1::SecretKey;
+use fedimint_tonic_lnd::lnrpc::invoice::InvoiceState;
+use fedimint_tonic_lnd::{lnrpc, LightningClient};
 use lightning_invoice::{
     Bolt11InvoiceDescription, Bolt11InvoiceDescriptionRef, Currency, InvoiceBuilder, PaymentSecret,
 };
@@ -14,8 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
-use tonic_openssl_lnd::{lnrpc, LndLightningClient};
 
 const RELAYS: [&str; 8] = [
     "wss://relay.snort.social",
@@ -39,7 +39,7 @@ const RELAYS: [&str; 8] = [
 /// * `key` - The Nostr keys for signing events
 pub async fn start_invoice_subscription(
     db: Db,
-    mut lnd: LndLightningClient,
+    mut lnd: LightningClient,
     key: Keys,
     telegram_token: Option<String>,
     telegram_id: Option<String>,
@@ -61,8 +61,8 @@ pub async fn start_invoice_subscription(
             .await
             .expect("Failed to receive invoices")
         {
-            match InvoiceState::from_i32(ln_invoice.state) {
-                Some(InvoiceState::Settled) => {
+            match InvoiceState::try_from(ln_invoice.state) {
+                Ok(InvoiceState::Settled) => {
                     let db = db.clone();
                     let key = key.clone();
                     let client = client.clone();
@@ -103,10 +103,10 @@ pub async fn start_invoice_subscription(
                         }
                     });
                 }
-                None
-                | Some(InvoiceState::Canceled)
-                | Some(InvoiceState::Open)
-                | Some(InvoiceState::Accepted) => {}
+                Err(_)
+                | Ok(InvoiceState::Canceled)
+                | Ok(InvoiceState::Open)
+                | Ok(InvoiceState::Accepted) => {}
             }
         }
 
