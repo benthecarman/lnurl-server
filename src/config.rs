@@ -53,6 +53,10 @@ pub struct Config {
     #[clap(long, env = "LNURL_ROUTE_HINTS")]
     pub route_hints: bool,
 
+    /// Use blinded paths in invoices
+    #[clap(long, env = "LNURL_BLINDED_PATHS")]
+    pub blinded_paths: bool,
+
     /// Telegram bot token for sending notifications
     #[clap(long, env = "LNURL_TELEGRAM_TOKEN")]
     pub telegram_token: Option<String>,

@@ -50,6 +50,7 @@ pub(crate) async fn get_invoice_impl(
         description_hash: desc_hash.to_byte_array().to_vec(),
         expiry: 86_400,
         private: state.route_hints,
+        is_blinded: state.blinded_paths,
         ..Default::default()
     };
 

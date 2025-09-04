@@ -39,6 +39,7 @@ pub struct State {
     // -- config options --
     pub domain: String,
     pub route_hints: bool,
+    pub blinded_paths: bool,
     pub min_sendable: u64,
     pub max_sendable: u64,
 }
@@ -90,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
         name_watcher: Arc::new(RwLock::new(HashMap::new())),
         domain: config.domain.clone(),
         route_hints: config.route_hints,
+        blinded_paths: config.blinded_paths,
         min_sendable: config.min_sendable,
         max_sendable: config.max_sendable,
     };
