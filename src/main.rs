@@ -48,7 +48,7 @@ pub struct State {
 async fn main() -> anyhow::Result<()> {
     let config: Config = Config::parse();
 
-    let lnd_addr = format!("http://{}:{}", config.lnd_host, config.lnd_port);
+    let lnd_addr = format!("https://{}:{}", config.lnd_host, config.lnd_port);
     let mut client =
         fedimint_tonic_lnd::connect(lnd_addr, config.cert_file(), config.macaroon_file())
             .await
