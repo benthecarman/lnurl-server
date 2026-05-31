@@ -3,6 +3,8 @@ use nostr::Event;
 use serde::{Deserialize, Serialize};
 use sled::Db;
 
+const INVOICES_TREE: &str = "invoices";
+
 /// Data structure for storing information about a lightning invoice and its associated Nostr zap request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Zap {
@@ -25,6 +27,33 @@ pub fn upsert_zap(db: &Db, payment_hash: String, zap: Zap) -> anyhow::Result<()>
     db.insert(payment_hash.as_bytes(), value)?;
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvoiceRecord {
+    pub invoice: Bolt11Invoice,
+    pub desc_hash: String,
+}
+
+pub fn upsert_invoice_record(
+    db: &Db,
+    payment_hash: String,
+    record: InvoiceRecord,
+) -> anyhow::Result<()> {
+    let tree = db.open_tree(INVOICES_TREE)?;
+    let value = serde_json::to_vec(&record)?;
+    tree.insert(payment_hash.as_bytes(), value)?;
+    tree.flush()?;
+    Ok(())
+}
+
+pub fn get_invoice_record(db: &Db, payment_hash: &str) -> anyhow::Result<Option<InvoiceRecord>> {
+    let tree = db.open_tree(INVOICES_TREE)?;
+    let value = tree.get(payment_hash.as_bytes())?;
+    match value {
+        Some(value) => Ok(Some(serde_json::from_slice(&value)?)),
+        None => Ok(None),
+    }
 }
 
 /// Retrieves a Zap record from the database using the payment hash as the key.

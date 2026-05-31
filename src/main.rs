@@ -19,27 +19,30 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::spawn;
 use tokio::sync::RwLock;
-use tonic_openssl_lnd::lnrpc::{GetInfoRequest, GetInfoResponse};
-use tonic_openssl_lnd::LndLightningClient;
 use tower::ServiceBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::config::*;
+use crate::node::NodeClient;
 use crate::routes::*;
 use crate::subscriber::start_invoice_subscription;
 
 mod config;
 mod db;
+mod node;
 mod routes;
 mod subscriber;
 mod systemd;
 
+#[cfg(not(any(feature = "lnd", feature = "ldk-server")))]
+compile_error!("At least one of the `lnd` or `ldk-server` features must be enabled.");
+
 #[derive(Clone)]
 pub struct State {
     pub db: Db,
-    pub lnd: LndLightningClient,
+    pub node: NodeClient,
     pub keys: Keys,
     pub name_watcher: Arc<RwLock<HashMap<sha256::Hash, String>>>,
 
@@ -58,33 +61,7 @@ async fn main() -> anyhow::Result<()> {
         return health_probe(&config.bind, config.port).await;
     }
 
-    // tonic_openssl_lnd silently falls back to cleartext gRPC (while still
-    // sending the macaroon!) when the cert file cannot be read, so verify
-    // both credential files are readable before connecting.
-    let cert_file = config.cert_file();
-    let macaroon_file = config.macaroon_file();
-    std::fs::read(&cert_file)
-        .map_err(|e| anyhow::anyhow!("Failed to read LND TLS cert file {cert_file}: {e}"))?;
-    std::fs::read(&macaroon_file)
-        .map_err(|e| anyhow::anyhow!("Failed to read LND macaroon file {macaroon_file}: {e}"))?;
-
-    let mut client = tonic_openssl_lnd::connect(
-        config.lnd_host.clone(),
-        config.lnd_port,
-        cert_file,
-        macaroon_file,
-    )
-    .await
-    .expect("failed to connect");
-
-    let mut ln_client = client.lightning().clone();
-    let lnd_info: GetInfoResponse = ln_client
-        .get_info(GetInfoRequest {})
-        .await
-        .expect("Failed to get lnd info")
-        .into_inner();
-
-    println!("Connected to LND: {}", lnd_info.identity_pubkey);
+    let node = NodeClient::connect(&config).await?;
 
     // Create the datadir if it doesn't exist
     let path = PathBuf::from(&config.data_dir);
@@ -117,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = State {
         db,
-        lnd: client.lightning().clone(),
+        node,
         keys: keys.clone(),
         name_watcher: Arc::new(RwLock::new(HashMap::new())),
         domain: config.domain.clone(),
@@ -172,7 +149,7 @@ async fn main() -> anyhow::Result<()> {
     // Invoice event stream
     spawn(start_invoice_subscription(
         state.db.clone(),
-        state.lnd.clone(),
+        state.node.clone(),
         keys,
         config.telegram_token,
         config.telegram_chat_id,
@@ -208,7 +185,7 @@ async fn main() -> anyhow::Result<()> {
 
     let graceful = server.with_graceful_shutdown(shutdown_signal());
 
-    // The listener is bound, LND is reachable and the names are loaded, so
+    // The listener is bound, the node is reachable and the names are loaded, so
     // report readiness to systemd (a no-op outside a Type=notify unit)
     systemd::spawn_watchdog();
     systemd::notify_ready(&format!("Serving on http://{addr}"));
@@ -275,7 +252,7 @@ async fn health_probe(bind: &str, port: u16) -> anyhow::Result<()> {
     if status.is_success() {
         Ok(())
     } else {
-        // the body carries the reason, e.g. {"status":"fail","output":"lnd unreachable"}
+        // the body carries the reason, e.g. {"status":"fail","output":"node unreachable"}
         let body = response.text().await.unwrap_or_default();
         Err(anyhow::anyhow!("{url} returned {status}: {body}"))
     }
@@ -422,39 +399,21 @@ impl HealthResponse {
     }
 }
 
-/// How long the health check waits for LND. Kept below the 5 second timeouts
-/// of the `health-check` subcommand and the Docker HEALTHCHECK, so a hung
-/// LND produces a "fail" response instead of a probe timeout.
-const HEALTH_LND_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long the health check waits for the node. Kept below the 5 second
+/// timeouts of the `health-check` subcommand and the Docker HEALTHCHECK, so a
+/// hung node produces a "fail" response instead of a probe timeout.
+const HEALTH_NODE_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Checks that LND answers a GetInfo call within `timeout`.
+/// Health check that passes only if the node answers a cheap info call, so
+/// the service reports unhealthy while the node is down or unreachable.
 ///
-/// Error details go to the log; the returned reason is generic because the
-/// health check route is unauthenticated.
-async fn check_lnd(mut lnd: LndLightningClient, timeout: Duration) -> Result<(), &'static str> {
-    match tokio::time::timeout(timeout, lnd.get_info(GetInfoRequest {})).await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => {
-            eprintln!("Health check failed, LND GetInfo error: {e}");
-            Err("lnd unreachable")
-        }
-        Err(_) => {
-            eprintln!("Health check failed, LND GetInfo timed out after {timeout:?}");
-            Err("lnd timeout")
-        }
-    }
-}
-
-/// Health check that passes only if LND answers a GetInfo call, so the
-/// service reports unhealthy while the node is down or unreachable.
-///
-/// The route is unauthenticated but rate limited, and GetInfo is one of the
-/// cheapest LND calls, so the load a client can push onto the node is
-/// bounded.
+/// The route is unauthenticated but rate limited, and the info call is one
+/// of the cheapest node calls, so the load a client can push onto the node
+/// is bounded.
 pub async fn health_check(
     Extension(state): Extension<State>,
 ) -> (StatusCode, Json<HealthResponse>) {
-    match check_lnd(state.lnd.clone(), HEALTH_LND_TIMEOUT).await {
+    match state.node.check_health(HEALTH_NODE_TIMEOUT).await {
         Ok(()) => (StatusCode::OK, Json(HealthResponse::pass())),
         Err(output) => (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -466,11 +425,15 @@ pub async fn health_check(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "lnd")]
     use axum::body::{Body, Bytes};
+    #[cfg(feature = "lnd")]
     use axum::http::{HeaderMap, HeaderValue};
+    #[cfg(feature = "lnd")]
     use axum::response::Response;
 
     /// Serves `router` on a random loopback port.
+    #[cfg(feature = "lnd")]
     fn serve(router: Router) -> SocketAddr {
         let server =
             axum::Server::bind(&"127.0.0.1:0".parse().unwrap()).serve(router.into_make_service());
@@ -482,6 +445,7 @@ mod tests {
     /// A stand-in LND that answers any gRPC call with an empty message and
     /// `grpc-status: 0`. An empty protobuf decodes as a default
     /// `GetInfoResponse`, which is all the health check needs.
+    #[cfg(feature = "lnd")]
     fn serve_fake_lnd() -> SocketAddr {
         async fn ok_grpc() -> Response<Body> {
             let (mut tx, body) = Body::channel();
@@ -501,6 +465,7 @@ mod tests {
     }
 
     /// Builds a `State` whose LND client points at `lnd_port` on loopback.
+    #[cfg(feature = "lnd")]
     async fn test_state(lnd_port: u16) -> State {
         let dir = std::env::temp_dir().join(format!(
             "lnurl-server-test-{}-{lnd_port}",
@@ -522,7 +487,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         State {
             db: sled::Config::new().temporary(true).open().unwrap(),
-            lnd: client.lightning().clone(),
+            node: NodeClient::Lnd(client.lightning().clone()),
             keys: Keys::generate(),
             name_watcher: Arc::new(RwLock::new(HashMap::new())),
             domain: String::new(),
@@ -533,6 +498,7 @@ mod tests {
     }
 
     /// Serves the real health check route backed by `state`.
+    #[cfg(feature = "lnd")]
     fn serve_health_check(state: State) -> SocketAddr {
         serve(
             Router::new()
@@ -549,6 +515,7 @@ mod tests {
         port
     }
 
+    #[cfg(feature = "lnd")]
     #[tokio::test]
     async fn health_check_passes_when_lnd_answers() {
         let lnd = serve_fake_lnd();
@@ -567,6 +534,7 @@ mod tests {
         health_probe("0.0.0.0", addr.port()).await.unwrap();
     }
 
+    #[cfg(feature = "lnd")]
     #[tokio::test]
     async fn health_check_fails_when_lnd_unreachable() {
         let addr = serve_health_check(test_state(closed_port()).await);
@@ -577,14 +545,15 @@ mod tests {
         assert_eq!(response.status().as_u16(), 503);
         let body: serde_json::Value = response.json().await.unwrap();
         assert_eq!(body["status"], "fail");
-        assert_eq!(body["output"], "lnd unreachable");
+        assert_eq!(body["output"], "node unreachable");
 
         let err = health_probe("127.0.0.1", addr.port()).await.unwrap_err();
-        assert!(err.to_string().contains("lnd unreachable"), "{err}");
+        assert!(err.to_string().contains("node unreachable"), "{err}");
     }
 
+    #[cfg(feature = "lnd")]
     #[tokio::test]
-    async fn check_lnd_times_out_when_lnd_hangs() {
+    async fn check_health_times_out_when_lnd_hangs() {
         // accepts connections but never answers
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -597,8 +566,8 @@ mod tests {
         });
 
         let state = test_state(port).await;
-        let result = check_lnd(state.lnd, Duration::from_millis(200)).await;
-        assert_eq!(result, Err("lnd timeout"));
+        let result = state.node.check_health(Duration::from_millis(200)).await;
+        assert_eq!(result, Err("node timeout"));
     }
 
     #[tokio::test]

@@ -69,7 +69,7 @@ backups if you want to keep your zap identity across reinstalls.
 ### systemd
 
 The server speaks the `sd_notify` protocol, so the unit can use `Type=notify`.
-`systemctl start` then returns only once the server is connected to LND and
+`systemctl start` then returns only once the server is connected to the node and
 listening, and units ordered after it wait for that. `systemctl stop` sends
 `SIGTERM`, which starts a graceful shutdown. If `WatchdogSec=` is set, the
 server pings the watchdog and systemd restarts it when the process stops
@@ -137,10 +137,28 @@ not the flags given to the server. Set the port with `-e LNURL_PORT` as above,
 or override the probe with `--health-cmd`. The same command works outside
 Docker, e.g. `lnurl-server --port 8080 health-check`.
 
-The `/health-check` route answers `503` with `{"status":"fail"}` when LND does
-not answer a `GetInfo` call within a few seconds, so the probe fails while the
-node is down or unreachable.
+The `/health-check` route answers `503` with `{"status":"fail"}` when the node
+does not answer an info call (`GetInfo` on LND, `GetNodeInfo` on LDK Server)
+within a few seconds, so the probe fails while the node is down or
+unreachable.
 
 Note the LND connection uses TLS with the pinned `tls.cert`; the server refuses
 to start if the cert or macaroon file is unreadable rather than risking a
 cleartext connection.
+
+## Lightning backends
+
+By default the crate builds with both `lnd` and `ldk-server` support and uses LND unless `--node-backend ldk-server` is set. At least one backend feature must be enabled.
+
+To use LDK Server:
+
+```bash
+lnurl-server --node-backend ldk-server --domain mydomain.com --network bitcoin --data-dir ~/.lnurl-server/ --port 8080 --ldk-server-host localhost --ldk-server-port 3536 --ldk-server-cert-file ~/.ldk-server/tls.crt --ldk-server-api-key-file ~/.ldk-server/bitcoin/api_key
+```
+
+For backend-specific builds:
+
+```bash
+cargo build --no-default-features --features lnd
+cargo build --no-default-features --features ldk-server
+```

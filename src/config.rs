@@ -1,5 +1,11 @@
 use bitcoin::Network;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeBackend {
+    Lnd,
+    LdkServer,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, author, about)]
@@ -24,6 +30,26 @@ pub struct Config {
     /// Port of the GRPC server for lnd
     #[clap(default_value_t = 10009, long, env = "LNURL_LND_PORT")]
     pub lnd_port: u32,
+
+    /// Lightning node backend to connect to
+    #[clap(long, env = "LNURL_NODE_BACKEND")]
+    pub node_backend: Option<NodeBackend>,
+
+    /// Host of the HTTPS gRPC server for ldk-server
+    #[clap(default_value_t = String::from("127.0.0.1"), long, env = "LNURL_LDK_SERVER_HOST")]
+    pub ldk_server_host: String,
+
+    /// Port of the HTTPS gRPC server for ldk-server
+    #[clap(default_value_t = 3536, long, env = "LNURL_LDK_SERVER_PORT")]
+    pub ldk_server_port: u16,
+
+    /// Path to tls.crt file for ldk-server
+    #[clap(long, env = "LNURL_LDK_SERVER_CERT_FILE")]
+    ldk_server_cert_file: Option<String>,
+
+    /// Path to api_key file for ldk-server
+    #[clap(long, env = "LNURL_LDK_SERVER_API_KEY_FILE")]
+    ldk_server_api_key_file: Option<String>,
 
     /// Network lnd is running on ["bitcoin", "testnet", "signet, "regtest"]
     #[clap(default_value_t = Network::Bitcoin, short, long, env = "LNURL_NETWORK")]
@@ -84,6 +110,13 @@ pub enum Command {
 }
 
 impl Config {
+    pub fn node_backend(&self) -> NodeBackend {
+        match self.node_backend {
+            Some(backend) => backend,
+            None => default_node_backend(),
+        }
+    }
+
     /// Gets the path to the LND macaroon file.
     ///
     /// If a macaroon file path is explicitly specified in the config, that path is used.
@@ -107,6 +140,33 @@ impl Config {
     pub fn cert_file(&self) -> String {
         self.cert_file.clone().unwrap_or_else(default_cert_file)
     }
+
+    pub fn ldk_server_cert_file(&self) -> String {
+        self.ldk_server_cert_file
+            .clone()
+            .unwrap_or_else(default_ldk_server_cert_file)
+    }
+
+    pub fn ldk_server_api_key_file(&self) -> String {
+        self.ldk_server_api_key_file
+            .clone()
+            .unwrap_or_else(|| default_ldk_server_api_key_file(&self.network))
+    }
+}
+
+#[cfg(feature = "lnd")]
+fn default_node_backend() -> NodeBackend {
+    NodeBackend::Lnd
+}
+
+#[cfg(all(not(feature = "lnd"), feature = "ldk-server"))]
+fn default_node_backend() -> NodeBackend {
+    NodeBackend::LdkServer
+}
+
+#[cfg(not(any(feature = "lnd", feature = "ldk-server")))]
+fn default_node_backend() -> NodeBackend {
+    unreachable!("At least one node backend feature must be enabled")
 }
 
 /// Gets the user's home directory path.
@@ -134,6 +194,18 @@ fn home_directory() -> String {
 /// A string with the default path to the LND TLS certificate file
 pub fn default_cert_file() -> String {
     format!("{}/.lnd/tls.cert", home_directory())
+}
+
+pub fn default_ldk_server_cert_file() -> String {
+    format!("{}/.ldk-server/tls.crt", home_directory())
+}
+
+pub fn default_ldk_server_api_key_file(network: &Network) -> String {
+    format!(
+        "{}/.ldk-server/{}/api_key",
+        home_directory(),
+        network.to_string().to_lowercase()
+    )
 }
 
 /// Gets the default path for the LND macaroon file based on the network.

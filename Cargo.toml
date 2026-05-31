@@ -27,13 +27,19 @@ serde = "1.0"
 serde_json = "1.0"
 sled = "0.34.7"
 tokio = { version = "1.26.0", features = ["full"] }
-tonic_openssl_lnd = "0.2.0"
+tonic_openssl_lnd = { version = "0.2.0", optional = true }
 tower = "0.4"
 tower_governor = "0.1"
 tower-http = { version = "0.4.0", features = ["cors"] }
 hex = "0.4.3"
 urlencoding = "2.1"
+ldk-server-client = { git = "https://github.com/lightningdevkit/ldk-server", rev = "21a903ccb89496285c58a55ffdce42a9f0353a05", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 # sd_notify protocol for Type=notify systemd units; pure Rust, no libsystemd
 sd-notify = "0.5.0"
+
+[features]
+default = ["lnd", "ldk-server"]
+lnd = ["dep:tonic_openssl_lnd"]
+ldk-server = ["dep:ldk-server-client"]
