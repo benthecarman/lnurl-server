@@ -19,8 +19,8 @@ bitcoin = { version = "0.32.7", features = ["serde"] }
 clap = { version = "4.1.14", features = ["derive", "env"] }
 lightning-invoice = { version = "0.33.2", features = ["serde", "std"] }
 lnurl-rs = { version = "0.9.0", default-features = false }
-nostr = { version = "0.40.0", default-features = false, features = ["nip57"] }
-nostr-sdk = "0.40.0"
+nostr = { version = "0.44", default-features = false, features = ["nip57"] }
+nostr-sdk = "0.44"
 home = "0.5.4"
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 serde = "1.0"
@@ -28,6 +28,8 @@ serde_json = "1.0"
 sled = "0.34.7"
 tokio = { version = "1.26.0", features = ["full"] }
 tonic_openssl_lnd = "0.2.0"
+tower = "0.4"
+tower_governor = "0.1"
 tower-http = { version = "0.4.0", features = ["cors"] }
 hex = "0.4.3"
 urlencoding = "2.1"
