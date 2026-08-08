@@ -47,11 +47,21 @@ pub struct State {
 async fn main() -> anyhow::Result<()> {
     let config: Config = Config::parse();
 
+    // tonic_openssl_lnd silently falls back to cleartext gRPC (while still
+    // sending the macaroon!) when the cert file cannot be read, so verify
+    // both credential files are readable before connecting.
+    let cert_file = config.cert_file();
+    let macaroon_file = config.macaroon_file();
+    std::fs::read(&cert_file)
+        .map_err(|e| anyhow::anyhow!("Failed to read LND TLS cert file {cert_file}: {e}"))?;
+    std::fs::read(&macaroon_file)
+        .map_err(|e| anyhow::anyhow!("Failed to read LND macaroon file {macaroon_file}: {e}"))?;
+
     let mut client = tonic_openssl_lnd::connect(
         config.lnd_host.clone(),
         config.lnd_port,
-        config.cert_file(),
-        config.macaroon_file(),
+        cert_file,
+        macaroon_file,
     )
     .await
     .expect("failed to connect");
@@ -67,7 +77,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Create the datadir if it doesn't exist
     let path = PathBuf::from(&config.data_dir);
+    let data_dir_existed = path.exists();
     std::fs::create_dir_all(path.clone())?;
+
+    // The data dir holds the Nostr secret key and zap data; restrict access
+    #[cfg(unix)]
+    if !data_dir_existed {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+    }
 
     let db_path = {
         let mut path = path.clone();
@@ -150,7 +168,10 @@ async fn main() -> anyhow::Result<()> {
             name_watcher.insert(hash, parts[1].to_string());
         }
 
-        println!("Precomputed {} names for LNURL pay server", name_watcher.len());
+        println!(
+            "Precomputed {} names for LNURL pay server",
+            name_watcher.len()
+        );
     }
 
     let graceful = server.with_graceful_shutdown(async {
@@ -213,6 +234,23 @@ impl NostrKeys {
 fn get_keys(path: PathBuf) -> Keys {
     match File::open(&path) {
         Ok(file) => {
+            // the file holds the Nostr secret key; fix overly permissive modes
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = file.metadata() {
+                    let mode = meta.permissions().mode() & 0o777;
+                    if mode & 0o077 != 0 {
+                        eprintln!(
+                            "Warning: {} has insecure permissions {mode:03o}, setting to 600",
+                            path.display()
+                        );
+                        let _ =
+                            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                    }
+                }
+            }
+
             let reader = BufReader::new(file);
             let n: NostrKeys = from_reader(reader).expect("Could not parse JSON");
 
@@ -222,7 +260,16 @@ fn get_keys(path: PathBuf) -> Keys {
             let keys = NostrKeys::generate();
             let json_str = to_string(&keys).expect("Could not serialize data");
 
-            let mut file = File::create(path).expect("Could not create file");
+            // create_new avoids following clobbering symlinks; mode 600 keeps
+            // the secret key readable only by the owner
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&path).expect("Could not create file");
             file.write_all(json_str.as_bytes())
                 .expect("Could not write to file");
 
