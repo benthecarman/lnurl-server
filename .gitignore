@@ -1,1 +1,9 @@
 /target
+
+# runtime data: contains the Nostr secret key and payment history
+keys.json
+zaps.db/
+*.macaroon
+tls.cert
+.env
+.env.*

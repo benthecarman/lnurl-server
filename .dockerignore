@@ -2,5 +2,14 @@
 .github
 *.md
 justfile
-.env.local
 .env
+.env.*
+.git
+.idea
+target
+
+# runtime data: contains the Nostr secret key and payment history
+keys.json
+zaps.db/
+*.macaroon
+tls.cert
