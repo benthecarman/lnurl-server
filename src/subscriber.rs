@@ -1,4 +1,4 @@
-use crate::db::{get_zap, upsert_zap};
+use crate::db::{claim_zap, get_zap, remove_zap};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::key::Secp256k1;
@@ -45,22 +45,46 @@ pub async fn start_invoice_subscription(
     telegram_id: Option<String>,
     name_watcher: Arc<RwLock<HashMap<sha256::Hash, String>>>,
 ) {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("failed to build http client");
+
+    // last settle index seen, so a resubscription resumes where we left off
+    // instead of replaying the node's full invoice history
+    let mut settle_index = 0;
+
     loop {
         println!("Starting invoice subscription");
 
-        let sub = lnrpc::InvoiceSubscription::default();
-        let mut invoice_stream = lnd
-            .subscribe_invoices(sub)
-            .await
-            .expect("Failed to start invoice subscription")
-            .into_inner();
+        let sub = lnrpc::InvoiceSubscription {
+            settle_index,
+            ..Default::default()
+        };
+        let mut invoice_stream = match lnd.subscribe_invoices(sub).await {
+            Ok(stream) => stream.into_inner(),
+            Err(e) => {
+                eprintln!("Failed to start invoice subscription: {e}");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
-        while let Some(ln_invoice) = invoice_stream
-            .message()
-            .await
-            .expect("Failed to receive invoices")
-        {
+        loop {
+            let ln_invoice = match invoice_stream.message().await {
+                Ok(Some(invoice)) => invoice,
+                Ok(None) => {
+                    eprintln!("Invoice subscription stream closed, resubscribing");
+                    break;
+                }
+                Err(e) => {
+                    eprintln!("Failed to receive invoices: {e}");
+                    break;
+                }
+            };
+
+            settle_index = settle_index.max(ln_invoice.settle_index);
+
             match InvoiceState::from_i32(ln_invoice.state) {
                 Some(InvoiceState::Settled) => {
                     let db = db.clone();
@@ -150,8 +174,16 @@ async fn handle_paid_invoice(
             let name = name_watcher.get(&hash).cloned();
             Ok(InvoiceSource::Name(name))
         }
-        Some(mut zap) => {
+        Some(zap) => {
             if zap.note_id.is_some() {
+                return Ok(InvoiceSource::Zap);
+            }
+
+            // Atomically claim the zap so that concurrent or replayed settlement
+            // events for the same payment hash cannot both broadcast a receipt.
+            // If we crash after claiming, the record keeps its marker and is
+            // skipped on replay: a lost receipt is preferred over a duplicate.
+            if !claim_zap(db, &payment_hash, &zap)? {
                 return Ok(InvoiceSource::Zap);
             }
 
@@ -165,7 +197,7 @@ async fn handle_paid_invoice(
             let amt_msats = zap
                 .invoice
                 .amount_milli_satoshis()
-                .expect("Invoice must have an amount");
+                .ok_or_else(|| anyhow::anyhow!("Invoice has no amount"))?;
 
             let desc = match zap.invoice.description() {
                 Bolt11InvoiceDescriptionRef::Direct(str) => {
@@ -195,24 +227,6 @@ async fn handle_paid_invoice(
             )
             .sign_with_keys(&keys)?;
 
-            if let Some(token) = telegram_token {
-                if let Some(id) = telegram_id {
-                    tokio::spawn(async move {
-                        let url = format!(
-                            "https://api.telegram.org/bot{token}/sendMessage?chat_id={}&text={}",
-                            urlencoding::encode(id.as_str()),
-                            urlencoding::encode(
-                                format!("Zapped! {} sats", amt_msats / 1000).as_str()
-                            )
-                        );
-
-                        if let Err(e) = http.get(&url).send().await {
-                            eprintln!("Failed to send Telegram message: {e}");
-                        }
-                    });
-                }
-            }
-
             // Create new client
             let client = Client::new(keys);
             for r in RELAYS {
@@ -225,13 +239,32 @@ async fn handle_paid_invoice(
             let event_id = client.send_event(&event).await?;
             let _ = client.disconnect().await;
 
-            println!(
-                "Broadcasted event id: {}!",
-                event_id.to_bech32().expect("bech32")
-            );
+            let note_id = event_id.to_bech32()?;
+            println!("Broadcasted event id: {note_id}!");
 
-            zap.note_id = Some(event_id.to_bech32().expect("bech32"));
-            upsert_zap(db, payment_hash, zap)?;
+            // The receipt is out; drop the record so zap data is not kept
+            // forever and replayed settlements find nothing to redo.
+            remove_zap(db, &payment_hash)?;
+
+            if let Some(token) = telegram_token {
+                if let Some(id) = telegram_id {
+                    tokio::spawn(async move {
+                        let url = format!(
+                            "https://api.telegram.org/bot{token}/sendMessage?chat_id={}&text={}",
+                            urlencoding::encode(id.as_str()),
+                            urlencoding::encode(
+                                format!("Zapped! {} sats", amt_msats / 1000).as_str()
+                            )
+                        );
+
+                        // without_url(): reqwest errors embed the request URL,
+                        // which contains the bot token and must not hit the logs
+                        if let Err(e) = http.get(&url).send().await {
+                            eprintln!("Failed to send Telegram message: {}", e.without_url());
+                        }
+                    });
+                }
+            }
 
             Ok(InvoiceSource::Zap)
         }
