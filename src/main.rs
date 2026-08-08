@@ -1,3 +1,4 @@
+use axum::error_handling::HandleErrorLayer;
 use axum::http::{Method, StatusCode, Uri};
 use axum::routing::get;
 use axum::{http, Extension, Json, Router};
@@ -11,6 +12,7 @@ use sled::Db;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Write};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -18,6 +20,8 @@ use tokio::spawn;
 use tokio::sync::RwLock;
 use tonic_openssl_lnd::lnrpc::{GetInfoRequest, GetInfoResponse};
 use tonic_openssl_lnd::LndLightningClient;
+use tower::ServiceBuilder;
+use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::config::*;
@@ -115,11 +119,21 @@ async fn main() -> anyhow::Result<()> {
         max_sendable: config.max_sendable,
     };
 
-    let addr: std::net::SocketAddr = format!("{}:{}", config.bind, config.port)
+    let addr: SocketAddr = format!("{}:{}", config.bind, config.port)
         .parse()
         .expect("Failed to parse bind/port for webserver");
 
     println!("Webserver running on http://{}", addr);
+
+    // Per-IP rate limiting: the endpoints are unauthenticated by design, so
+    // this bounds how fast a single client can create invoices / write records.
+    let governor_conf = Box::new(
+        GovernorConfigBuilder::default()
+            .per_second(10)
+            .burst_size(50)
+            .finish()
+            .expect("invalid rate limit config"),
+    );
 
     let server_router = Router::new()
         .route("/health-check", get(health_check))
@@ -127,6 +141,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/verify/:desc_hash/:pay_hash", get(verify))
         .route("/.well-known/lnurlp/:name", get(get_lnurl_pay))
         .fallback(fallback)
+        .layer(
+            ServiceBuilder::new()
+                // HandleErrorLayer wraps GovernorLayer to turn its boxed
+                // errors (e.g. rate limit exceeded) into proper responses
+                .layer(HandleErrorLayer::new(handle_layer_error))
+                .layer(GovernorLayer {
+                    config: Box::leak(governor_conf),
+                }),
+        )
         .layer(Extension(state.clone()))
         .layer(
             CorsLayer::new()
@@ -135,7 +158,8 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods([Method::GET, Method::POST]),
         );
 
-    let server = axum::Server::bind(&addr).serve(server_router.into_make_service());
+    let server = axum::Server::bind(&addr)
+        .serve(server_router.into_make_service_with_connect_info::<SocketAddr>());
 
     // Invoice event stream
     spawn(start_invoice_subscription(
@@ -198,6 +222,27 @@ async fn main() -> anyhow::Result<()> {
 /// A 404 status code and a message indicating the route was not found
 async fn fallback(uri: Uri) -> (StatusCode, String) {
     (StatusCode::NOT_FOUND, format!("No route for {}", uri))
+}
+
+/// Error handler for tower middleware layers (currently the rate limiter).
+///
+/// # Parameters
+/// * `err` - The boxed error produced by the layer
+///
+/// # Returns
+/// A 429 status code for rate limit errors, 500 for anything else
+async fn handle_layer_error(err: tower::BoxError) -> (StatusCode, String) {
+    if err.is::<tower_governor::errors::GovernorError>() {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            String::from("Rate limit exceeded"),
+        )
+    } else {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Unhandled internal error: {err}"),
+        )
+    }
 }
 
 /// Storage structure for Nostr keys used by the server.
