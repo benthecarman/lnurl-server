@@ -15,6 +15,12 @@ use std::str::FromStr;
 use tonic_openssl_lnd::lnrpc;
 use tonic_openssl_lnd::lnrpc::invoice::InvoiceState;
 
+/// Maximum length of a Lightning address name served by the LNURL-pay endpoint.
+const MAX_NAME_LENGTH: usize = 64;
+
+/// Maximum number of names tracked in memory by the name watcher.
+const MAX_WATCHED_NAMES: usize = 10_000;
+
 /// Creates a Lightning invoice and optionally stores zap request information.
 ///
 /// This is the core implementation for generating invoices for LNURL-pay requests.
@@ -95,6 +101,23 @@ pub async fn get_invoice(
             })),
         )),
         Some(amount_msats) => {
+            if amount_msats == 0
+                || amount_msats < state.min_sendable
+                || amount_msats > state.max_sendable
+                || amount_msats > i64::MAX as u64
+            {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "status": "ERROR",
+                        "reason": format!(
+                            "Amount must be between {} and {} millisatoshis",
+                            state.min_sendable, state.max_sendable
+                        ),
+                    })),
+                ));
+            }
+
             let zap_request = params.get("nostr").map_or_else(
                 || Ok(None),
                 |event_str| {
@@ -158,12 +181,12 @@ pub async fn get_lnurl_pay(
     Path(name): Path<String>,
     Extension(state): Extension<State>,
 ) -> Result<Json<PayResponse>, (StatusCode, Json<Value>)> {
-    if name.is_empty() {
+    if name.is_empty() || name.len() > MAX_NAME_LENGTH {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({
                 "status": "ERROR",
-                "reason": "Name parameter is required",
+                "reason": format!("Name parameter must be 1-{MAX_NAME_LENGTH} characters"),
             })),
         ));
     }
@@ -190,10 +213,15 @@ pub async fn get_lnurl_pay(
         ),
     };
 
-    // insert the name into the state for later use
+    // insert the name into the state for later use, but bound the map's size
+    // so unauthenticated requests cannot grow memory without limit
     tokio::spawn(async move {
         let mut map = state.name_watcher.write().await;
-        map.insert(hash, name)
+        if map.len() < MAX_WATCHED_NAMES || map.contains_key(&hash) {
+            map.insert(hash, name)
+        } else {
+            None
+        }
     });
 
     Ok(Json(resp))
