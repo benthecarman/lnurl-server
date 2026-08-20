@@ -16,11 +16,13 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::spawn;
 use tokio::sync::RwLock;
 use tonic_openssl_lnd::lnrpc::{GetInfoRequest, GetInfoResponse};
 use tonic_openssl_lnd::LndLightningClient;
 use tower::ServiceBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 use tower_http::cors::{Any, CorsLayer};
 
@@ -129,8 +131,9 @@ async fn main() -> anyhow::Result<()> {
     // this bounds how fast a single client can create invoices / write records.
     let governor_conf = Box::new(
         GovernorConfigBuilder::default()
-            .per_second(10)
+            .period(Duration::from_millis(100))
             .burst_size(50)
+            .key_extractor(SmartIpKeyExtractor)
             .finish()
             .expect("invalid rate limit config"),
     );
