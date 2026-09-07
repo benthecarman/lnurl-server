@@ -34,6 +34,7 @@ mod config;
 mod db;
 mod routes;
 mod subscriber;
+mod systemd;
 
 #[derive(Clone)]
 pub struct State {
@@ -201,11 +202,12 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let graceful = server.with_graceful_shutdown(async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to create Ctrl+C shutdown signal");
-    });
+    let graceful = server.with_graceful_shutdown(shutdown_signal());
+
+    // The listener is bound, LND is reachable and the names are loaded, so
+    // report readiness to systemd (a no-op outside a Type=notify unit)
+    systemd::spawn_watchdog();
+    systemd::notify_ready(&format!("Serving on http://{addr}"));
 
     // Await the server to receive the shutdown signal
     if let Err(e) = graceful.await {
@@ -213,6 +215,38 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolves when the process receives a shutdown signal: Ctrl+C (SIGINT) or,
+/// on unix, SIGTERM, which is what systemd and Docker send on stop.
+///
+/// Tells systemd the service is stopping before returning, so the graceful
+/// shutdown drains in-flight requests while systemd waits for the exit.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to create Ctrl+C shutdown signal");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to create SIGTERM shutdown signal")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    println!("Shutdown signal received, stopping webserver");
+    systemd::notify_stopping();
 }
 
 /// Fallback route handler that returns a 404 Not Found response

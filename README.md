@@ -66,6 +66,50 @@ and `zaps.db` (payment history). The server creates it with `0700` permissions
 and the key file with `0600`; keep it on a private volume and include it in
 backups if you want to keep your zap identity across reinstalls.
 
+### systemd
+
+The server speaks the `sd_notify` protocol, so the unit can use `Type=notify`.
+`systemctl start` then returns only once the server is connected to LND and
+listening, and units ordered after it wait for that. `systemctl stop` sends
+`SIGTERM`, which starts a graceful shutdown. If `WatchdogSec=` is set, the
+server pings the watchdog and systemd restarts it when the process stops
+responding.
+
+Create a dedicated system user (e.g. `useradd --system lnurl`) and make the
+macaroon and cert readable by it. `StateDirectory=` makes systemd create the
+data dir with the right owner and mode.
+
+```ini
+[Unit]
+Description=LNURL pay server
+After=network-online.target lnd.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=lnurl
+ExecStart=/usr/local/bin/lnurl-server
+StateDirectory=lnurl-server
+StateDirectoryMode=0700
+Environment=LNURL_DATA_DIR=/var/lib/lnurl-server
+Environment=LNURL_DOMAIN=mydomain.com
+Environment=LNURL_BIND=127.0.0.1
+Environment=LNURL_PORT=8080
+Environment=LNURL_MACAROON_FILE=/etc/lnurl-server/lnurl.macaroon
+Environment=LNURL_CERT_FILE=/etc/lnurl-server/tls.cert
+# Secrets such as LNURL_TELEGRAM_TOKEN go here, not in the unit file
+EnvironmentFile=-/etc/lnurl-server/env
+WatchdogSec=30
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Outside systemd the notifications are skipped, so the same binary runs
+unchanged by hand or in Docker.
+
 ### Docker
 
 Images are published to `ghcr.io/benthecarman/lnurl-server`. The container runs

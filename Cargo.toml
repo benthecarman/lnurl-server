@@ -33,3 +33,7 @@ tower_governor = "0.1"
 tower-http = { version = "0.4.0", features = ["cors"] }
 hex = "0.4.3"
 urlencoding = "2.1"
+
+[target.'cfg(unix)'.dependencies]
+# sd_notify protocol for Type=notify systemd units; pure Rust, no libsystemd
+sd-notify = "0.5.0"
