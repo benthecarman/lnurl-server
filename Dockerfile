@@ -31,4 +31,10 @@ COPY --from=builder /app/target/release/lnurl-server /usr/local/bin/lnurl-server
 USER lnurl
 WORKDIR /var/lib/lnurl-server
 
+# Probes /health-check on LNURL_PORT (default 3000) over loopback. The probe is
+# a separate process, so it sees environment variables but not the flags given
+# to the server: set LNURL_PORT, or override the probe with --health-cmd.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["/usr/local/bin/lnurl-server", "health-check"]
+
 ENTRYPOINT ["/usr/local/bin/lnurl-server"]

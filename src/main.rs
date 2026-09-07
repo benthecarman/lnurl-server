@@ -54,6 +54,10 @@ pub struct State {
 async fn main() -> anyhow::Result<()> {
     let config: Config = Config::parse();
 
+    if let Some(Command::HealthCheck) = config.command {
+        return health_probe(&config.bind, config.port).await;
+    }
+
     // tonic_openssl_lnd silently falls back to cleartext gRPC (while still
     // sending the macaroon!) when the cert file cannot be read, so verify
     // both credential files are readable before connecting.
@@ -249,6 +253,31 @@ async fn shutdown_signal() {
     systemd::notify_stopping();
 }
 
+/// Probes the local server's `/health-check` route and returns an error if it
+/// does not answer with a success status. Backs the `health-check` subcommand
+/// used by the Docker `HEALTHCHECK` and similar liveness checks.
+///
+/// # Parameters
+/// * `bind` - The server's bind address; a wildcard address maps to loopback
+/// * `port` - The server's port
+async fn health_probe(bind: &str, port: u16) -> anyhow::Result<()> {
+    let host = match bind {
+        "0.0.0.0" => "127.0.0.1",
+        "[::]" => "[::1]",
+        other => other,
+    };
+    let url = format!("http://{host}:{port}/health-check");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+    let status = client.get(&url).send().await?.status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("{url} returned {status}"))
+    }
+}
+
 /// Fallback route handler that returns a 404 Not Found response
 /// when a request is made to a non-existent route.
 ///
@@ -380,4 +409,36 @@ impl HealthResponse {
 /// https://datatracker.ietf.org/doc/html/draft-inadarei-api-health-check
 pub async fn health_check() -> Result<Json<HealthResponse>, (StatusCode, String)> {
     Ok(Json(HealthResponse::new_ok()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Serves the health check route on a random loopback port.
+    fn serve_health_check() -> SocketAddr {
+        let router = Router::new().route("/health-check", get(health_check));
+        let server =
+            axum::Server::bind(&"127.0.0.1:0".parse().unwrap()).serve(router.into_make_service());
+        let addr = server.local_addr();
+        tokio::spawn(server);
+        addr
+    }
+
+    #[tokio::test]
+    async fn health_probe_passes_for_running_server() {
+        let addr = serve_health_check();
+        health_probe("127.0.0.1", addr.port()).await.unwrap();
+        // a wildcard bind is probed over loopback
+        health_probe("0.0.0.0", addr.port()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn health_probe_fails_without_server() {
+        // grab a free port and release it so nothing listens there
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        assert!(health_probe("127.0.0.1", port).await.is_err());
+    }
 }

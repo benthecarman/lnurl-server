@@ -1,5 +1,5 @@
 use bitcoin::Network;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug, Clone)]
 #[command(version, author, about)]
@@ -70,6 +70,17 @@ pub struct Config {
     /// e.g. "abc123:alice"
     #[clap(long)]
     pub proxied_name: Vec<String>,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+/// Utility commands. Without one, the server starts.
+#[derive(Subcommand, Debug, Clone)]
+pub enum Command {
+    /// Probe a running server's /health-check route and exit non-zero if it
+    /// does not answer, for Docker HEALTHCHECK and similar liveness checks
+    HealthCheck,
 }
 
 impl Config {

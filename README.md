@@ -120,14 +120,22 @@ docker run -d \
   -v lnurl-data:/var/lib/lnurl-server \
   -v ~/.lnd/tls.cert:/tls.cert:ro \
   -v ~/.lnd/lnurl.macaroon:/lnurl.macaroon:ro \
+  -e LNURL_PORT=8080 \
   ghcr.io/benthecarman/lnurl-server \
-  --domain mydomain.com --bind 0.0.0.0 --port 8080 \
+  --domain mydomain.com --bind 0.0.0.0 \
   --lnd-host <lnd-host> --cert-file /tls.cert --macaroon-file /lnurl.macaroon
 ```
 
 Mount LND credentials read-only, and put the container on a network reachable
 by your TLS proxy (inside Docker, `--bind 0.0.0.0` is appropriate). Secrets can
 be passed with `--env-file` instead of flags.
+
+The image has a `HEALTHCHECK` that runs `lnurl-server health-check` every 30
+seconds. It probes `/health-check` on `LNURL_PORT` (default 3000) over
+loopback. The probe is a separate process, so it sees environment variables but
+not the flags given to the server. Set the port with `-e LNURL_PORT` as above,
+or override the probe with `--health-cmd`. The same command works outside
+Docker, e.g. `lnurl-server --port 8080 health-check`.
 
 Note the LND connection uses TLS with the pinned `tls.cert`; the server refuses
 to start if the cert or macaroon file is unreadable rather than risking a
