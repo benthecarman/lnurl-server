@@ -137,6 +137,10 @@ not the flags given to the server. Set the port with `-e LNURL_PORT` as above,
 or override the probe with `--health-cmd`. The same command works outside
 Docker, e.g. `lnurl-server --port 8080 health-check`.
 
+The `/health-check` route answers `503` with `{"status":"fail"}` when LND does
+not answer a `GetInfo` call within a few seconds, so the probe fails while the
+node is down or unreachable.
+
 Note the LND connection uses TLS with the pinned `tls.cert`; the server refuses
 to start if the cert or macaroon file is unreadable rather than risking a
 cleartext connection.

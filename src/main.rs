@@ -270,11 +270,14 @@ async fn health_probe(bind: &str, port: u16) -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()?;
-    let status = client.get(&url).send().await?.status();
+    let response = client.get(&url).send().await?;
+    let status = response.status();
     if status.is_success() {
         Ok(())
     } else {
-        Err(anyhow::anyhow!("{url} returned {status}"))
+        // the body carries the reason, e.g. {"status":"fail","output":"lnd unreachable"}
+        let body = response.text().await.unwrap_or_default();
+        Err(anyhow::anyhow!("{url} returned {status}: {body}"))
     }
 }
 
@@ -389,35 +392,86 @@ fn get_keys(path: PathBuf) -> Keys {
     }
 }
 
+/// Response body for `/health-check`, in the format of the IETF draft for
+/// HTTP API health checks:
+/// https://datatracker.ietf.org/doc/html/draft-inadarei-api-health-check
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+    /// Reason for a "fail" status, omitted when passing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
 }
 
 impl HealthResponse {
-    /// Fabricate a status: pass response without checking database connectivity
-    pub fn new_ok() -> Self {
+    pub fn pass() -> Self {
         Self {
             status: String::from("pass"),
             version: String::from("0"),
+            output: None,
+        }
+    }
+
+    pub fn fail(output: &str) -> Self {
+        Self {
+            status: String::from("fail"),
+            version: String::from("0"),
+            output: Some(output.to_string()),
         }
     }
 }
 
-/// IETF draft RFC for HTTP API Health Checks:
-/// https://datatracker.ietf.org/doc/html/draft-inadarei-api-health-check
-pub async fn health_check() -> Result<Json<HealthResponse>, (StatusCode, String)> {
-    Ok(Json(HealthResponse::new_ok()))
+/// How long the health check waits for LND. Kept below the 5 second timeouts
+/// of the `health-check` subcommand and the Docker HEALTHCHECK, so a hung
+/// LND produces a "fail" response instead of a probe timeout.
+const HEALTH_LND_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Checks that LND answers a GetInfo call within `timeout`.
+///
+/// Error details go to the log; the returned reason is generic because the
+/// health check route is unauthenticated.
+async fn check_lnd(mut lnd: LndLightningClient, timeout: Duration) -> Result<(), &'static str> {
+    match tokio::time::timeout(timeout, lnd.get_info(GetInfoRequest {})).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => {
+            eprintln!("Health check failed, LND GetInfo error: {e}");
+            Err("lnd unreachable")
+        }
+        Err(_) => {
+            eprintln!("Health check failed, LND GetInfo timed out after {timeout:?}");
+            Err("lnd timeout")
+        }
+    }
+}
+
+/// Health check that passes only if LND answers a GetInfo call, so the
+/// service reports unhealthy while the node is down or unreachable.
+///
+/// The route is unauthenticated but rate limited, and GetInfo is one of the
+/// cheapest LND calls, so the load a client can push onto the node is
+/// bounded.
+pub async fn health_check(
+    Extension(state): Extension<State>,
+) -> (StatusCode, Json<HealthResponse>) {
+    match check_lnd(state.lnd.clone(), HEALTH_LND_TIMEOUT).await {
+        Ok(()) => (StatusCode::OK, Json(HealthResponse::pass())),
+        Err(output) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthResponse::fail(output)),
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::{Body, Bytes};
+    use axum::http::{HeaderMap, HeaderValue};
+    use axum::response::Response;
 
-    /// Serves the health check route on a random loopback port.
-    fn serve_health_check() -> SocketAddr {
-        let router = Router::new().route("/health-check", get(health_check));
+    /// Serves `router` on a random loopback port.
+    fn serve(router: Router) -> SocketAddr {
         let server =
             axum::Server::bind(&"127.0.0.1:0".parse().unwrap()).serve(router.into_make_service());
         let addr = server.local_addr();
@@ -425,20 +479,130 @@ mod tests {
         addr
     }
 
+    /// A stand-in LND that answers any gRPC call with an empty message and
+    /// `grpc-status: 0`. An empty protobuf decodes as a default
+    /// `GetInfoResponse`, which is all the health check needs.
+    fn serve_fake_lnd() -> SocketAddr {
+        async fn ok_grpc() -> Response<Body> {
+            let (mut tx, body) = Body::channel();
+            tokio::spawn(async move {
+                // gRPC frame: 1 byte compression flag + 4 byte length, all zero
+                let _ = tx.send_data(Bytes::from_static(&[0; 5])).await;
+                let mut trailers = HeaderMap::new();
+                trailers.insert("grpc-status", HeaderValue::from_static("0"));
+                let _ = tx.send_trailers(trailers).await;
+            });
+            Response::builder()
+                .header("content-type", "application/grpc")
+                .body(body)
+                .unwrap()
+        }
+        serve(Router::new().fallback(ok_grpc))
+    }
+
+    /// Builds a `State` whose LND client points at `lnd_port` on loopback.
+    async fn test_state(lnd_port: u16) -> State {
+        let dir = std::env::temp_dir().join(format!(
+            "lnurl-server-test-{}-{lnd_port}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let macaroon = dir.join("macaroon");
+        std::fs::write(&macaroon, b"test").unwrap();
+        // an unreadable cert makes the client speak cleartext HTTP/2, which
+        // is what the fake LND serves
+        let mut client = tonic_openssl_lnd::connect(
+            "127.0.0.1".to_string(),
+            lnd_port as u32,
+            dir.join("missing.cert").to_string_lossy().into_owned(),
+            macaroon.to_string_lossy().into_owned(),
+        )
+        .await
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        State {
+            db: sled::Config::new().temporary(true).open().unwrap(),
+            lnd: client.lightning().clone(),
+            keys: Keys::generate(),
+            name_watcher: Arc::new(RwLock::new(HashMap::new())),
+            domain: String::new(),
+            route_hints: false,
+            min_sendable: 1_000,
+            max_sendable: 1_000_000,
+        }
+    }
+
+    /// Serves the real health check route backed by `state`.
+    fn serve_health_check(state: State) -> SocketAddr {
+        serve(
+            Router::new()
+                .route("/health-check", get(health_check))
+                .layer(Extension(state)),
+        )
+    }
+
+    /// Reserves a loopback port and releases it so nothing listens there.
+    fn closed_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    }
+
     #[tokio::test]
-    async fn health_probe_passes_for_running_server() {
-        let addr = serve_health_check();
+    async fn health_check_passes_when_lnd_answers() {
+        let lnd = serve_fake_lnd();
+        let addr = serve_health_check(test_state(lnd.port()).await);
+
+        let response = reqwest::get(format!("http://{addr}/health-check"))
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["status"], "pass");
+        assert!(body.get("output").is_none());
+
         health_probe("127.0.0.1", addr.port()).await.unwrap();
         // a wildcard bind is probed over loopback
         health_probe("0.0.0.0", addr.port()).await.unwrap();
     }
 
     #[tokio::test]
-    async fn health_probe_fails_without_server() {
-        // grab a free port and release it so nothing listens there
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    async fn health_check_fails_when_lnd_unreachable() {
+        let addr = serve_health_check(test_state(closed_port()).await);
+
+        let response = reqwest::get(format!("http://{addr}/health-check"))
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16(), 503);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["status"], "fail");
+        assert_eq!(body["output"], "lnd unreachable");
+
+        let err = health_probe("127.0.0.1", addr.port()).await.unwrap_err();
+        assert!(err.to_string().contains("lnd unreachable"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn check_lnd_times_out_when_lnd_hangs() {
+        // accepts connections but never answers
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        assert!(health_probe("127.0.0.1", port).await.is_err());
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                held.push(socket);
+            }
+        });
+
+        let state = test_state(port).await;
+        let result = check_lnd(state.lnd, Duration::from_millis(200)).await;
+        assert_eq!(result, Err("lnd timeout"));
+    }
+
+    #[tokio::test]
+    async fn health_probe_fails_without_server() {
+        assert!(health_probe("127.0.0.1", closed_port()).await.is_err());
     }
 }
