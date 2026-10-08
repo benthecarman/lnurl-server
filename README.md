@@ -49,15 +49,36 @@ client.
 
 ### Macaroon permissions
 
-The server only needs `GetInfo`, `AddInvoice`, `LookupInvoice` and
-`SubscribeInvoices`. Do **not** use `admin.macaroon`; bake a least-privilege
-macaroon instead:
+Do **not** give the server an admin macaroon. Bake a least-privilege one for
+your backend instead.
+
+#### LND
+
+The server only calls `GetInfo`, `AddInvoice`, `LookupInvoice` and
+`SubscribeInvoices`:
 
 ```bash
 lncli bakemacaroon info:read invoices:read invoices:write --save_to ~/.lnd/lnurl.macaroon
 ```
 
-and point `--macaroon-file` at it.
+Point `--macaroon-file` at it.
+
+#### LDK Server
+
+The server only calls `GetNodeInfo`, `Bolt11Receive`, `GetPaymentDetails` and
+`SubscribeEvents`, which need `node:read`, `invoices:create`, `payments:read`
+and `events:read`. `create-macaroon` registers a named token with the server
+so it can be revoked later, and prints it as JSON:
+
+```bash
+ldk-server-cli create-macaroon lnurl-server \
+  --permissions node:read invoices:create payments:read events:read \
+  | jq -r .token > ~/.ldk-server/lnurl.macaroon
+chmod 600 ~/.ldk-server/lnurl.macaroon
+```
+
+Point `--ldk-server-api-key-file` at it. To revoke it, look up its ID with
+`ldk-server-cli list-macaroons` and run `ldk-server-cli revoke-macaroon <id>`.
 
 ### Data directory
 
@@ -153,7 +174,7 @@ By default the crate builds with both `lnd` and `ldk-server` support and uses LN
 To use LDK Server:
 
 ```bash
-lnurl-server --node-backend ldk-server --domain mydomain.com --network bitcoin --data-dir ~/.lnurl-server/ --port 8080 --ldk-server-host localhost --ldk-server-port 3536 --ldk-server-cert-file ~/.ldk-server/tls.crt --ldk-server-api-key-file ~/.ldk-server/bitcoin/api_key
+lnurl-server --node-backend ldk-server --domain mydomain.com --network bitcoin --data-dir ~/.lnurl-server/ --port 8080 --ldk-server-host localhost --ldk-server-port 3536 --ldk-server-cert-file ~/.ldk-server/tls.crt --ldk-server-api-key-file ~/.ldk-server/lnurl.macaroon
 ```
 
 For backend-specific builds:
