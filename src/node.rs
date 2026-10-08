@@ -34,7 +34,7 @@ use tonic_openssl_lnd::LndLightningClient;
 #[derive(Clone)]
 pub enum NodeClient {
     #[cfg(feature = "lnd")]
-    Lnd(LndLightningClient),
+    Lnd(Box<LndLightningClient>),
     #[cfg(feature = "ldk-server")]
     LdkServer(Arc<LdkServerClient>),
 }
@@ -84,7 +84,7 @@ impl NodeClient {
                     .into_inner();
 
                 println!("Connected to LND: {}", lnd_info.identity_pubkey);
-                Ok(Self::Lnd(client.lightning().clone()))
+                Ok(Self::Lnd(Box::new(client.lightning().clone())))
             }
             #[cfg(feature = "ldk-server")]
             NodeBackend::LdkServer => {

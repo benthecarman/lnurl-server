@@ -487,7 +487,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         State {
             db: sled::Config::new().temporary(true).open().unwrap(),
-            node: NodeClient::Lnd(client.lightning().clone()),
+            node: NodeClient::Lnd(Box::new(client.lightning().clone())),
             keys: Keys::generate(),
             name_watcher: Arc::new(RwLock::new(HashMap::new())),
             domain: String::new(),

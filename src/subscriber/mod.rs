@@ -53,7 +53,7 @@ pub async fn start_invoice_subscription(
     match node {
         #[cfg(feature = "lnd")]
         NodeClient::Lnd(client) => {
-            lnd::start(db, client, key, telegram_token, telegram_id, name_watcher).await
+            lnd::start(db, *client, key, telegram_token, telegram_id, name_watcher).await
         }
         #[cfg(feature = "ldk-server")]
         NodeClient::LdkServer(client) => {
