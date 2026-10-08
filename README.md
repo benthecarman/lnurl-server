@@ -77,7 +77,7 @@ ldk-server-cli create-macaroon lnurl-server \
 chmod 600 ~/.ldk-server/lnurl.macaroon
 ```
 
-Point `--ldk-server-api-key-file` at it. To revoke it, look up its ID with
+Point `--ldk-server-macaroon-file` at it. To revoke it, look up its ID with
 `ldk-server-cli list-macaroons` and run `ldk-server-cli revoke-macaroon <id>`.
 
 ### Data directory
@@ -174,7 +174,7 @@ By default the crate builds with both `lnd` and `ldk-server` support and uses LN
 To use LDK Server:
 
 ```bash
-lnurl-server --node-backend ldk-server --domain mydomain.com --network bitcoin --data-dir ~/.lnurl-server/ --port 8080 --ldk-server-host localhost --ldk-server-port 3536 --ldk-server-cert-file ~/.ldk-server/tls.crt --ldk-server-api-key-file ~/.ldk-server/lnurl.macaroon
+lnurl-server --node-backend ldk-server --domain mydomain.com --network bitcoin --data-dir ~/.lnurl-server/ --port 8080 --ldk-server-host localhost --ldk-server-port 3536 --ldk-server-cert-file ~/.ldk-server/tls.crt --ldk-server-macaroon-file ~/.ldk-server/lnurl.macaroon
 ```
 
 For backend-specific builds:

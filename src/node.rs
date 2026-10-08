@@ -89,12 +89,12 @@ impl NodeClient {
             #[cfg(feature = "ldk-server")]
             NodeBackend::LdkServer => {
                 let cert_pem = std::fs::read(config.ldk_server_cert_file())?;
-                let api_key = std::fs::read_to_string(config.ldk_server_api_key_file())?
+                let macaroon = std::fs::read_to_string(config.ldk_server_macaroon_file())?
                     .trim()
                     .to_string();
                 let client = LdkServerClient::new(
                     format!("{}:{}", config.ldk_server_host, config.ldk_server_port),
-                    api_key,
+                    macaroon,
                     &cert_pem,
                 )
                 .map_err(|e| anyhow!("Failed to create ldk-server client: {e}"))?;
