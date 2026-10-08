@@ -47,7 +47,8 @@ pub struct Config {
     #[clap(long, env = "LNURL_LDK_SERVER_CERT_FILE")]
     ldk_server_cert_file: Option<String>,
 
-    /// Path to api_key file for ldk-server
+    /// Path to the hex macaroon file for ldk-server. Defaults to the admin
+    /// macaroon; prefer a least-privilege one (see README)
     #[clap(long, env = "LNURL_LDK_SERVER_API_KEY_FILE")]
     ldk_server_api_key_file: Option<String>,
 
@@ -67,7 +68,8 @@ pub struct Config {
     #[clap(long, env = "LNURL_CERT_FILE")]
     cert_file: Option<String>,
 
-    /// Path to admin.macaroon file for lnd
+    /// Path to the macaroon file for lnd. Defaults to admin.macaroon; prefer
+    /// a least-privilege one (see README)
     #[clap(long, env = "LNURL_MACAROON_FILE")]
     macaroon_file: Option<String>,
 
@@ -202,7 +204,7 @@ pub fn default_ldk_server_cert_file() -> String {
 
 pub fn default_ldk_server_api_key_file(network: &Network) -> String {
     format!(
-        "{}/.ldk-server/{}/api_key",
+        "{}/.ldk-server/{}/macaroons/admin.macaroon",
         home_directory(),
         network.to_string().to_lowercase()
     )
